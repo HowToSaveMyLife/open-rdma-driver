@@ -69,8 +69,6 @@ Then, navigate to the `examples` directory, compile them, and run:
 ```bash
 cd examples
 make
-# if use RTL simulator do debug, use the following:
-make EXTRA_CFLAGS=-DCOMPILE_FOR_RTL_SIMULATOR_TEST
 export LD_LIBRARY_PATH=../dtld-ibverbs/target/debug:../dtld-ibverbs/rdma-core-55.0/build/lib
 RUST_LOG=debug ./loopback 8192
 
