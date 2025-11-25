@@ -1,6 +1,6 @@
-# Blue RDMA Driver 安装指南
+# Open RDMA Driver 安装指南
 
-本文档提供 Blue RDMA Driver 的快速安装步骤。详细技术细节和故障排除请参考 [detail](./detail/) 文件夹中的文档。
+本文档提供 Open RDMA Driver 的快速安装步骤。详细技术细节和故障排除请参考 [detail](./detail/) 文件夹中的文档。
 
 ## 环境要求
 
@@ -29,21 +29,21 @@ sudo apt install cmake libnl-3-dev libnl-route-3-dev libclang-dev libibverbs-dev
 
 **在你希望放置项目的目录下运行**（建议使用较短路径如 `/home/user/`）：
 ```bash
-git clone --recursive https://github.com/bsbds/blue-rdma-driver.git
-cd blue-rdma-driver
+git clone --recursive https://github.com/bsbds/open-rdma-driver.git
+cd open-rdma-driver
 
 # 如果克隆时未使用 --recursive，可以手动初始化
 git submodule update --init --recursive
 ```
 
-**注意**：项目路径不宜过长，建议使用 `/home/user/blue-rdma-driver` 而非深层嵌套路径。详见：[路径长度问题](./detail/path-length-issue.md)
+**注意**：项目路径不宜过长，建议使用 `/home/user/open-rdma-driver` 而非深层嵌套路径。详见：[路径长度问题](./detail/path-length-issue.md)
 
 ### 4. 编译并加载驱动模块
 
 **WSL2 环境**需要先准备内核头文件，详细步骤请参考：[WSL2 内核头文件准备指南](./detail/wsl-kernel-headers.md)，或者可以使用 `make KBUILD_MODPOST_WARN=1` 跳过使用内核头文件，但有一定风险
 
 
-**在 blue-rdma-driver 项目根目录下运行**：
+**在 open-rdma-driver 项目根目录下运行**：
 ```bash
 # 编译驱动
 make
@@ -63,9 +63,9 @@ lsmod | grep bluerdma
 
 ### 5. 分配大页内存
 
-Blue RDMA Driver 需要使用大页内存。使用提供的脚本分配 2048 MB 大页。
+Open RDMA Driver 需要使用大页内存。使用提供的脚本分配 2048 MB 大页。
 
-**在 blue-rdma-driver 项目根目录下运行**：
+**在 open-rdma-driver 项目根目录下运行**：
 ```bash
 ./scripts/hugepages.sh alloc 2048
 ```
@@ -81,7 +81,7 @@ cat /proc/meminfo | grep Huge
 
 **Mock 模式（推荐用于开发测试）**：
 
-**在 blue-rdma-driver 项目根目录下运行**：
+**在 open-rdma-driver 项目根目录下运行**：
 ```bash
 cd dtld-ibverbs
 cargo build --no-default-features --features mock
@@ -93,7 +93,7 @@ cd ..
 
 **Sim 模式（用于 RTL 仿真器调试）**：
 
-**在 blue-rdma-driver 项目根目录下运行**：
+**在 open-rdma-driver 项目根目录下运行**：
 ```bash
 cd dtld-ibverbs
 cargo build --no-default-features --features sim
@@ -105,7 +105,7 @@ cd ..
 
 **硬件模式（hw）**：
 
-**在 blue-rdma-driver 项目根目录下运行**：
+**在 open-rdma-driver 项目根目录下运行**：
 ```bash
 cd dtld-ibverbs
 cargo build --no-default-features --features hw
@@ -116,7 +116,7 @@ cd ..
 
 ### 7. 编译 rdma-core
 
-**在 blue-rdma-driver 项目根目录下运行**：
+**在 open-rdma-driver 项目根目录下运行**：
 ```bash
 cd dtld-ibverbs/rdma-core-55.0
 
@@ -134,7 +134,7 @@ cd ../..
 
 ### 8. 配置网络接口
 
-为 Blue RDMA 虚拟网络接口分配 IP 地址。
+为 Open RDMA 虚拟网络接口分配 IP 地址。
 
 **在任意目录下运行**：
 ```bash
@@ -154,7 +154,7 @@ ip addr show blue1
 
 直接将环境变量添加到 `~/.bashrc`，使其在每次打开终端时自动加载。
 
-**在 blue-rdma-driver 项目根目录下运行**：
+**在 open-rdma-driver 项目根目录下运行**：
 ```bash
 # 获取项目绝对路径
 PROJECT_PATH=$(pwd)
@@ -162,7 +162,7 @@ PROJECT_PATH=$(pwd)
 # 添加到 .bashrc
 cat >> ~/.bashrc << EOF
 
-# Blue RDMA Driver Environment
+# Open RDMA Driver Environment
 export LD_LIBRARY_PATH=$PROJECT_PATH/dtld-ibverbs/target/debug:$PROJECT_PATH/dtld-ibverbs/rdma-core-55.0/build/lib:\${LD_LIBRARY_PATH}
 EOF
 
@@ -172,7 +172,7 @@ source ~/.bashrc
 
 **方法二：临时设置（仅当前终端）**
 
-**在 blue-rdma-driver 项目根目录下运行**：
+**在 open-rdma-driver 项目根目录下运行**：
 ```bash
 # 使用提供的脚本
 source ./scripts/setup-env.sh
@@ -183,7 +183,7 @@ export LD_LIBRARY_PATH=$PWD/dtld-ibverbs/target/debug:$PWD/dtld-ibverbs/rdma-cor
 
 ### 10. 验证安装
 
-**在 blue-rdma-driver 项目根目录下运行，编译示例程序**：
+**在 open-rdma-driver 项目根目录下运行，编译示例程序**：
 ```bash
 cd examples
 make
@@ -195,7 +195,7 @@ make
 
 **Mock 模式**：
 
-**在 blue-rdma-driver/examples 目录下运行**：
+**在 open-rdma-driver/examples 目录下运行**：
 ```bash
 RUST_LOG=debug ./loopback 8192
 ```
@@ -205,7 +205,7 @@ RUST_LOG=debug ./loopback 8192
 # 1. 先在单独的终端启动仿真器（在 achronix-400g 项目中）
 # 具体启动命令请参见 achronix-400g 项目的文档
 
-# 2. 在 blue-rdma-driver/examples 目录下运行测试
+# 2. 在 open-rdma-driver/examples 目录下运行测试
 RUST_LOG=debug ./loopback 8192
 ```
 
@@ -223,10 +223,10 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 sudo apt install cmake libnl-3-dev libnl-route-3-dev libclang-dev libibverbs-dev
 
 # 2. 克隆项目（在你希望放置项目的目录下运行，建议使用较短路径）
-git clone --recursive https://github.com/bsbds/blue-rdma-driver.git
-cd blue-rdma-driver
+git clone --recursive https://github.com/bsbds/open-rdma-driver.git
+cd open-rdma-driver
 
-# ========== 以下命令在 blue-rdma-driver 项目根目录下运行 ==========
+# ========== 以下命令在 open-rdma-driver 项目根目录下运行 ==========
 
 # 3. 编译并加载驱动（WSL2 需要先准备内核头文件）
 make && make install
@@ -249,16 +249,16 @@ cd dtld-ibverbs/rdma-core-55.0 && ./build.sh && cd ../..
 sudo ip addr add 17.34.51.10/24 dev blue0
 sudo ip addr add 17.34.51.11/24 dev blue1
 
-# 8. 设置环境变量（永久）- 在 blue-rdma-driver 项目根目录下运行
+# 8. 设置环境变量（永久）- 在 open-rdma-driver 项目根目录下运行
 PROJECT_PATH=$(pwd)
 cat >> ~/.bashrc << EOF
 
-# Blue RDMA Driver Environment
+# Open RDMA Driver Environment
 export LD_LIBRARY_PATH=$PROJECT_PATH/dtld-ibverbs/target/debug:$PROJECT_PATH/dtld-ibverbs/rdma-core-55.0/build/lib:\${LD_LIBRARY_PATH}
 EOF
 source ~/.bashrc
 
-# 9. 运行示例 - 在 blue-rdma-driver 项目根目录下运行
+# 9. 运行示例 - 在 open-rdma-driver 项目根目录下运行
 cd examples && make && RUST_LOG=debug ./loopback 8192
 ```
 
@@ -266,7 +266,7 @@ cd examples && make && RUST_LOG=debug ./loopback 8192
 
 ### Q1: rdma-core 编译在 81% 时失败
 **原因**：项目路径过长，导致 Unix socket 路径超出限制。
-**解决**：将项目移至较短路径（如 `/home/user/blue-rdma-driver`）。
+**解决**：将项目移至较短路径（如 `/home/user/open-rdma-driver`）。
 **详见**：[路径长度问题](./detail/path-length-issue.md)
 
 ### Q2: 找不到 `infiniband/verbs_api.h`

@@ -1,6 +1,6 @@
 # Achronix 400G 硬件仿真项目安装
 
-> **注意**：本文档描述的是独立的 `achronix-400g` 硬件仿真项目，与 `blue-rdma-driver` 项目位于不同仓库。
+> **注意**：本文档描述的是独立的 `achronix-400g` 硬件仿真项目，与 `open-rdma-driver` 项目位于不同仓库。
 
 ## 安装步骤
 
@@ -69,18 +69,18 @@ make run_system_test_server_2
 
 测试日志保存在 `test/cocotb/log/` 目录（`.loopback`、`.1`、`.2` 后缀）。
 
-## 与 Blue RDMA Driver 配合使用
+## 与 Open RDMA Driver 配合使用
 
 需要先编译 driver 为 sim 模式，同时完成 driver 的其他设置。
 
-**在 blue-rdma-driver 项目根目录下运行**：
+**在 open-rdma-driver 项目根目录下运行**：
 ```bash
 cd dtld-ibverbs
 cargo build --no-default-features --features sim
 cd ..
 ```
 
-Blue RDMA Driver 的 `sim` 模式需要先启动本项目的仿真器：
+Open RDMA Driver 的 `sim` 模式需要先启动本项目的仿真器：
 
 ### 单端测试（loopback）
 
@@ -91,7 +91,7 @@ cd test/cocotb
 make run_system_test_server_loopback
 ```
 
-**终端 2（在 blue-rdma-driver 项目根目录下运行）**：
+**终端 2（在 open-rdma-driver 项目根目录下运行）**：
 ```bash
 # 运行驱动测试
 cd examples
@@ -115,7 +115,7 @@ cd test/cocotb
 make run_system_test_server_2
 ```
 
-**终端 3（在 blue-rdma-driver 项目根目录下运行）**：
+**终端 3（在 open-rdma-driver 项目根目录下运行）**：
 ```bash
 # 编译并运行驱动测试 server
 cd examples
@@ -123,7 +123,7 @@ make
 RUST_LOG=debug ./send_recv 8192
 ```
 
-**终端 4（在 blue-rdma-driver 项目根目录下运行）**：
+**终端 4（在 open-rdma-driver 项目根目录下运行）**：
 ```bash
 # 运行驱动测试 client
 cd examples
