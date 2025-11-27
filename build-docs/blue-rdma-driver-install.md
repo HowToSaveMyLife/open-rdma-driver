@@ -22,7 +22,7 @@ source ~/.cargo/env
 
 **在任意目录下运行**：
 ```bash
-sudo apt install cmake libnl-3-dev libnl-route-3-dev libclang-dev libibverbs-dev
+sudo apt install cmake pkg-config libnl-3-dev libnl-route-3-dev libclang-dev libibverbs-dev
 ```
 
 ### 3. 克隆项目并初始化子模块
@@ -53,7 +53,7 @@ make
 # make KBUILD_MODPOST_WARN=1
 
 # 加载驱动模块
-make install
+sudo make install
 ```
 
 **在任意目录下运行，验证驱动加载成功**：
@@ -62,13 +62,35 @@ lsmod | grep bluerdma
 # 应显示：bluerdma
 ```
 
-### 5. 分配大页内存
+### 5. 配置网络接口
 
-Open RDMA Driver 需要使用大页内存。使用提供的脚本分配 2048 MB 大页。
+为 Open RDMA 虚拟网络接口分配 IP 地址。
+
+**在任意目录下运行**：
+```bash
+sudo ip addr add 17.34.51.10/24 dev blue0
+sudo ip addr add 17.34.51.11/24 dev blue1
+```
+
+**在任意目录下运行，验证配置**：
+```bash
+ip addr show blue0
+ip addr show blue1
+
+# 仿真模式下可能需要关闭网卡来防止配置被清空，母亲啊不清除原理
+sudo ip link set dev blue0 down
+sudo ip link set dev blue1 down
+
+
+```
+
+### 6. 分配大页内存
+
+Open RDMA Driver 需要使用大页内存。使用提供的脚本分配 512 MB 大页。
 
 **在 open-rdma-driver 项目根目录下运行**：
 ```bash
-./scripts/hugepages.sh alloc 2048
+sudo ./scripts/hugepages.sh alloc 512
 ```
 
 **在任意目录下运行，验证分配成功**：
@@ -76,7 +98,7 @@ Open RDMA Driver 需要使用大页内存。使用提供的脚本分配 2048 MB 
 cat /proc/meminfo | grep Huge
 ```
 
-### 6. 编译用户态库（dtld-ibverbs）
+### 7. 编译用户态库（dtld-ibverbs）
 
 根据使用场景选择编译模式：
 
@@ -115,7 +137,7 @@ cd ..
 - ⚠️ **注意**：硬件模式尚未完全测试，可能存在问题
 - 仅在有真实硬件设备时使用
 
-### 7. 编译 rdma-core
+### 8. 编译 rdma-core
 
 **在 open-rdma-driver 项目根目录下运行**：
 ```bash
@@ -133,22 +155,6 @@ cd ../..
 
 **常见问题**：如果编译在 81% 左右失败，提示 "size of unnamed array is negative"，这是路径过长导致的。请参考：[路径长度问题详解](./detail/path-length-issue.md)
 
-### 8. 配置网络接口
-
-为 Open RDMA 虚拟网络接口分配 IP 地址。
-
-**在任意目录下运行**：
-```bash
-sudo ip addr add 17.34.51.10/24 dev blue0
-sudo ip addr add 17.34.51.11/24 dev blue1
-```
-
-**在任意目录下运行，验证配置**：
-```bash
-ip addr show blue0
-ip addr show blue1
-```
-
 ### 9. 设置环境变量
 
 **方法一：永久设置（推荐）**
@@ -157,14 +163,15 @@ ip addr show blue1
 
 **在 open-rdma-driver 项目根目录下运行**：
 ```bash
-# 获取项目绝对路径
-PROJECT_PATH=$(pwd)
-
 # 添加到 .bashrc
 cat >> ~/.bashrc << EOF
 
 # Open RDMA Driver Environment
-export LD_LIBRARY_PATH=$PROJECT_PATH/dtld-ibverbs/target/debug:$PROJECT_PATH/dtld-ibverbs/rdma-core-55.0/build/lib:\${LD_LIBRARY_PATH}
+if [ -z "\$LD_LIBRARY_PATH" ]; then
+    export LD_LIBRARY_PATH="$(pwd)/dtld-ibverbs/target/debug:$(pwd)/dtld-ibverbs/rdma-core-55.0/build/lib"
+else
+    export LD_LIBRARY_PATH="$(pwd)/dtld-ibverbs/target/debug:$(pwd)/dtld-ibverbs/rdma-core-55.0/build/lib:\$LD_LIBRARY_PATH"
+fi
 EOF
 
 # 立即生效
@@ -194,25 +201,63 @@ make
 
 根据编译时选择的模式运行：
 
-**Mock 模式**：
+#### Mock 模式
+
+**单端回环测试（loopback）**：
 
 **在 open-rdma-driver/examples 目录下运行**：
 ```bash
-RUST_LOG=debug ./loopback 8192
+./loopback 8192
 ```
 
-**Sim 模式**：
+**双端测试（send_recv）**：
+
+**终端 1（在 open-rdma-driver/examples 目录下运行）**：
+```bash
+# 启动服务端
+./send_recv 8192
+```
+
+**终端 2（在 open-rdma-driver/examples 目录下运行）**：
+```bash
+# 启动客户端，连接到本地服务端
+./send_recv 8192 127.0.0.1
+```
+
+#### Sim 模式
+
+**单端回环测试（loopback）**：
 ```bash
 # 1. 先在单独的终端启动仿真器（在 achronix-400g 项目中）
 # 具体启动命令请参见 achronix-400g 项目的文档
 
 # 2. 在 open-rdma-driver/examples 目录下运行测试
-RUST_LOG=debug ./loopback 8192
+./loopback 8192
 ```
 
-成功运行将显示 RDMA 操作的调试日志。
+**双端测试（send_recv）**：
+需要分别启动两个不同的仿真器实例（参见 achronix-400g 项目文档），然后运行：
 
-**双端测试**：使用 send_recv 程序，同时需要分别启用两个不同的仿真器程序（参见 achronix-400g 项目文档）
+**终端 3（在 open-rdma-driver/examples 目录下运行）**：
+```bash
+./send_recv 8192
+```
+
+**终端 4（在 open-rdma-driver/examples 目录下运行）**：
+```bash
+./send_recv 8192 127.0.0.1
+```
+
+#### 调试选项
+
+**如需查看详细日志，可添加环境变量**：
+```bash
+RUST_LOG=debug ./loopback 8192
+# 或
+RUST_LOG=debug ./send_recv 8192
+```
+
+成功运行将显示 RDMA 操作的输出。
 
 ## 快速命令总结
 
@@ -221,7 +266,7 @@ RUST_LOG=debug ./loopback 8192
 ```bash
 # 1. 环境准备（在任意目录下运行）
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-sudo apt install cmake libnl-3-dev libnl-route-3-dev libclang-dev libibverbs-dev
+sudo apt install cmake pkg-config libnl-3-dev libnl-route-3-dev libclang-dev libibverbs-dev
 
 # 2. 克隆项目（在你希望放置项目的目录下运行，建议使用较短路径）
 git clone --recursive https://github.com/open-rdma/open-rdma-driver.git
@@ -231,12 +276,16 @@ git checkout dev
 # ========== 以下命令在 open-rdma-driver 项目根目录下运行 ==========
 
 # 3. 编译并加载驱动（WSL2 需要先准备内核头文件）
-make && make install
+make && sudo make install
 
-# 4. 分配大页
-./scripts/hugepages.sh alloc 2048
+# 4. 配置网络（在任意目录下运行）
+sudo ip addr add 17.34.51.10/24 dev blue0
+sudo ip addr add 17.34.51.11/24 dev blue1
 
-# 5. 编译用户态库（选择模式：mock/sim/hw）
+# 5. 分配大页
+sudo ./scripts/hugepages.sh alloc 512
+
+# 6. 编译用户态库（选择模式：mock/sim/hw）
 # Mock 模式（推荐）：
 cd dtld-ibverbs && cargo build --no-default-features --features mock && cd ..
 # Sim 模式（需要先启动仿真器）：
@@ -244,24 +293,23 @@ cd dtld-ibverbs && cargo build --no-default-features --features mock && cd ..
 # 硬件模式（未测试）：
 # cd dtld-ibverbs && cargo build --no-default-features --features hw && cd ..
 
-# 6. 编译 rdma-core
+# 7. 编译 rdma-core
 cd dtld-ibverbs/rdma-core-55.0 && ./build.sh && cd ../..
 
-# 7. 配置网络（在任意目录下运行）
-sudo ip addr add 17.34.51.10/24 dev blue0
-sudo ip addr add 17.34.51.11/24 dev blue1
-
 # 8. 设置环境变量（永久）- 在 open-rdma-driver 项目根目录下运行
-PROJECT_PATH=$(pwd)
 cat >> ~/.bashrc << EOF
 
 # Open RDMA Driver Environment
-export LD_LIBRARY_PATH=$PROJECT_PATH/dtld-ibverbs/target/debug:$PROJECT_PATH/dtld-ibverbs/rdma-core-55.0/build/lib:\${LD_LIBRARY_PATH}
+if [ -z "\$LD_LIBRARY_PATH" ]; then
+    export LD_LIBRARY_PATH="$(pwd)/dtld-ibverbs/target/debug:$(pwd)/dtld-ibverbs/rdma-core-55.0/build/lib"
+else
+    export LD_LIBRARY_PATH="$(pwd)/dtld-ibverbs/target/debug:$(pwd)/dtld-ibverbs/rdma-core-55.0/build/lib:\$LD_LIBRARY_PATH"
+fi
 EOF
 source ~/.bashrc
 
 # 9. 运行示例 - 在 open-rdma-driver 项目根目录下运行
-cd examples && make && RUST_LOG=debug ./loopback 8192
+cd examples && make && ./loopback 8192
 ```
 
 ## 常见问题

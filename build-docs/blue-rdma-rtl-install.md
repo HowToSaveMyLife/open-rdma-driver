@@ -28,13 +28,26 @@ git checkout dev
 
 **系统依赖**：
 ```bash
-sudo apt install verilator zlib1g-dev tcl8.6 libtcl8.6
+sudo apt install iverilog verilator zlib1g-dev tcl8.6 libtcl8.6
 ```
 
-**Python 依赖**（推荐使用 conda 环境）：
+**Python 依赖**：
+
+安装conda (其他python环境也可以)：
 ```bash
-pip install cocotb cocotb-test cocotbext-pcie cocotbext-axi scapy
+mkdir -p ~/miniconda3
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda3/miniconda.sh
+bash ~/miniconda3/miniconda.sh -b -u -p ~/miniconda3
+rm ~/miniconda3/miniconda.sh
+
+source ~/miniconda3/bin/activate
+conda init --all
 ```
+
+```bash
+pip install cocotb==1.9.2 cocotb-test cocotbext-pcie cocotbext-axi scapy
+```
+注意目前的测试代码不兼容 cocotb 2.0
 
 **说明**：
 - 使用 `verilator`（非 `iverilog`）进行仿真
