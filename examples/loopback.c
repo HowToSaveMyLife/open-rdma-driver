@@ -34,6 +34,8 @@ void printMemoryHex(void *start_addr, size_t length);
 void wait_for_enter(const char *message);
 size_t memory_diff(const char *buf1, const char *buf2, size_t length);
 
+// TODO 目前该文件没有 IBV_QPS_RTR 状态下的代码，需要补充完整，没有严格遵守 RESET -> INIT -> RTR -> RTS
+
 void die(const char *reason)
 {
   perror(reason);

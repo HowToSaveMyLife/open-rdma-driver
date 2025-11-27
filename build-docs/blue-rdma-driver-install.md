@@ -29,8 +29,9 @@ sudo apt install cmake libnl-3-dev libnl-route-3-dev libclang-dev libibverbs-dev
 
 **在你希望放置项目的目录下运行**（建议使用较短路径如 `/home/user/`）：
 ```bash
-git clone --recursive https://github.com/bsbds/open-rdma-driver.git
+git clone --recursive https://github.com/open-rdma/open-rdma-driver.git
 cd open-rdma-driver
+git checkout dev
 
 # 如果克隆时未使用 --recursive，可以手动初始化
 git submodule update --init --recursive
@@ -223,8 +224,9 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 sudo apt install cmake libnl-3-dev libnl-route-3-dev libclang-dev libibverbs-dev
 
 # 2. 克隆项目（在你希望放置项目的目录下运行，建议使用较短路径）
-git clone --recursive https://github.com/bsbds/open-rdma-driver.git
+git clone --recursive https://github.com/open-rdma/open-rdma-driver.git
 cd open-rdma-driver
+git checkout dev
 
 # ========== 以下命令在 open-rdma-driver 项目根目录下运行 ==========
 

@@ -134,56 +134,58 @@ pub unsafe extern "C" fn new(sysfs_name: *const c_char) -> *mut c_void // 设备
 
 Blue RDMA 驱动采用分层架构设计，由内核模块、用户态 Rust 驱动、C Provider 层和标准 libibverbs 库协同工作。
 
-### 四层架构概述
+### 架构概述
 
-整个系统由以下层次组成：
+整个系统采用用户态-内核态混合架构：
 
 ```
-┌─────────────────────────────────────────┐
-│   应用程序 (perftest, MPI, etc.)         │
-│   - 使用标准 libibverbs API             │
-└─────────────────────────────────────────┘
-              │ ibv_*() 调用
-              ▼
-┌─────────────────────────────────────────┐
-│   libibverbs + C Provider               │
-│   (rdma-core-55.0 编译产物)             │
-│                                         │
-│   ├─ libibverbs 核心                    │
-│   │   - 标准 IB Verbs API               │
-│   │   - 设备发现和管理                   │
-│   │                                     │
-│   └─ Blue RDMA Provider                 │
-│       (providers/bluerdma/)             │
-│       - 静态链接到 rdma-core            │
-│       - bluerdma_device_alloc()         │
-└─────────────────────────────────────────┘
-              │ dlopen("libbluerdma_rust.so")
-              │ (唯一的动态加载)
-              ▼
-┌─────────────────────────────────────────┐
-│   Rust Driver (rust-driver)             │
-│   - 核心业务逻辑实现                     │
-│   - 硬件资源管理                         │
-│   - 后台工作线程                         │
-└─────────────────────────────────────────┘
-              │ PCIe MMIO / UDP / Mock
-              ▼
-┌─────────────────────────────────────────┐
-│   Hardware / Simulator                  │
-│   - Blue RDMA 网卡                       │
-│   - RTL 仿真器                           │
-└─────────────────────────────────────────┘
+用户态                                           内核态
+────────────────────────────────────────────────────────────────────────
 
-     ┌──────────────────────────────┐
-     │  Kernel Driver (bluerdma.ko) │
-     │  - 设备注册                   │
-     │  - 创建 uverbs 字符设备       │
-     │  - GID 管理                   │
-     └──────────────────────────────┘
-              │
-              ├─ 创建 /dev/infiniband/uverbs* (字符设备，用于 ioctl 通信)
-              └─ 创建 /sys/class/infiniband_verbs/uverbs* (设备发现)
+┌─────────────────────────────────────┐
+│   应用程序 (perftest, MPI, etc.)     │
+│   - 使用标准 libibverbs API         │
+└─────────────────────────────────────┘
+            │ ibv_*() 调用
+            ▼
+┌─────────────────────────────────────┐       ┌─────────────────────────┐
+│ libibverbs + C Provider             │       │ Kernel Driver           │
+│ (libibverbs.so + 静态链接 provider) │       │ (bluerdma.ko)           │
+│                                     │       │ + ib_uverbs.ko          │
+│ ├─ libibverbs 核心  ────────────[1]────────>├─────────────────────────┤
+│ │  - 标准 IB Verbs API              │ sysfs │ - 注册 IB 设备          │
+│ │  - 设备发现和管理 <────────────[2]────────│ - 处理 ioctl/write      │
+│ │                                   │ ioctl │ - GID 管理              │
+│ └─ Blue RDMA Provider               │       └─────────────────────────┘
+│    (providers/bluerdma/)            │
+│    - 编译时静态链接                  │
+│    - bluerdma_device_alloc()        │
+└─────────────────────────────────────┘
+            │ dlopen("libbluerdma_rust.so")
+            │ (唯一的动态加载)
+            ▼
+┌─────────────────────────────────────┐
+│ Rust Driver (rust-driver)           │
+│ - 核心业务逻辑实现                   │
+│ - 硬件资源管理                       │
+│ - 后台工作线程                       │
+└─────────────────────────────────────┘
+            │ PCIe MMIO / UDP / Mock
+            ▼
+┌─────────────────────────────────────┐
+│ Hardware / Simulator                │
+│ - Blue RDMA 网卡                     │
+│ - RTL 仿真器                         │
+└─────────────────────────────────────┘
+
+通信通道说明：
+[1] 设备发现：/sys/class/infiniband_verbs/uverbs*
+    - libibverbs 扫描此目录发现设备
+    - 读取 dev 属性获取设备号
+
+[2] 设备通信：/dev/infiniband/uverbs*
+    - ibv_open_device() 时打开字符设备
+    - ioctl/write 系统调用与内核通信
 ```
 
 ### 各组件职责
