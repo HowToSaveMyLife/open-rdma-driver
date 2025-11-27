@@ -395,10 +395,39 @@ void run_client(int msg_len, char *server_ip)
   inet_pton(AF_INET, server_ip, &addr.sin_addr);
 
   printf("[DEBUG] run_client: Connecting to server %s:%d...\n", server_ip, PORT);
-  if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0)
+
+  // Retry connection up to 30 times (6 seconds between retries = 180 seconds total)
+  int max_retries = 30;
+  int retry_delay = 6; // seconds
+  int connected = 0;
+
+  for (int retry = 0; retry < max_retries; retry++)
   {
-    die("failed to connect");
+    if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) == 0)
+    {
+      connected = 1;
+      break;
+    }
+
+    if (retry < max_retries - 1)
+    {
+      printf("[DEBUG] run_client: Connection failed (attempt %d/%d), retrying in %d seconds...\n",
+             retry + 1, max_retries, retry_delay);
+      sleep(retry_delay);
+
+      // Need to create a new socket for the next retry attempt
+      close(sock);
+      sock = socket(AF_INET, SOCK_STREAM, 0);
+      if (sock < 0)
+        die("Failed to create socket for retry");
+    }
   }
+
+  if (!connected)
+  {
+    die("failed to connect after all retries");
+  }
+
   printf("[DEBUG] run_client: Connected to server successfully\n");
 
   uint32_t rkey;
