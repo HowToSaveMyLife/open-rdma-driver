@@ -173,9 +173,10 @@ Blue RDMA 驱动采用分层架构设计，由内核模块、用户态 Rust 驱�
             │ PCIe MMIO / UDP / Mock
             ▼
 ┌─────────────────────────────────────┐
-│ Hardware / Simulator                │
+│ Hardware / Simulator / Mock         │
 │ - Blue RDMA 网卡                     │
 │ - RTL 仿真器                         │
+│ - 软件模拟                           │
 └─────────────────────────────────────┘
 
 通信通道说明：
