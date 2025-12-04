@@ -257,7 +257,13 @@ impl QueuePairMessageTracker {
     fn poll_recv_completion(&mut self) -> Option<(RecvEvent, Option<Completion>)> {
         let event = self.merge.pop_recv()?;
         let completion = match event.op {
-            RecvEventOp::WriteWithImm { imm } => Some(Completion::RecvRdmaWithImm { imm }),
+            RecvEventOp::WriteWithImm { imm } => {
+                let x = self.post_recv_queue.pop_back().expect("no posted recv wr");
+                Some(Completion::RecvRdmaWithImm {
+                    wr_id: x.wr_id,
+                    imm,
+                })
+            }
             RecvEventOp::Recv => {
                 let x = self.post_recv_queue.pop_back().expect("no posted recv wr");
                 Some(Completion::Recv {
@@ -483,7 +489,7 @@ pub(crate) enum Completion {
     RdmaWrite { wr_id: u64 },
     RdmaRead { wr_id: u64 },
     Recv { wr_id: u64, imm: Option<u32> },
-    RecvRdmaWithImm { imm: u32 },
+    RecvRdmaWithImm { wr_id: u64, imm: u32 },
 }
 
 impl Completion {

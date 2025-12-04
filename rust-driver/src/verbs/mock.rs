@@ -121,6 +121,7 @@ struct QpCtx {
     conn: Option<QpConnetion>,
     abort_signal: Option<Arc<AtomicBool>>,
     handle: Option<thread::JoinHandle<()>>,
+    local_task_tx: Option<flume::Sender<LocalTask>>,
 }
 
 impl QpCtx {
@@ -138,7 +139,6 @@ pub(crate) struct MockDeviceCtx {
     send_qp_cq_map: HashMap<u32, u32>,
     recv_qp_cq_map: HashMap<u32, u32>,
     qp_ctx_table: QpTable<QpCtx>,
-    qp_local_task_tx: Option<flume::Sender<LocalTask>>,
     qp_manager: QpManager,
     mr_table: MrTable,
     pd_table: PdTable,
@@ -154,7 +154,6 @@ impl Default for MockDeviceCtx {
             send_qp_cq_map: HashMap::new(),
             recv_qp_cq_map: HashMap::new(),
             qp_ctx_table: QpTable::new(),
-            qp_local_task_tx: None,
             qp_manager: QpManager::new(),
             mr_table: MrTable::default(),
             pd_table: PdTable::default(),
@@ -214,8 +213,9 @@ impl VerbsOps for MockDeviceCtx {
         let conn = QpConnetion::new(self.self_ip.into(), qpn);
         let conn_c = conn.clone();
         let (tx, rx) = flume::unbounded::<LocalTask>();
-        _ = self.qp_local_task_tx.replace(tx);
+        let tx_for_ctx = tx;
         let mut recv_reqs = VecDeque::new();
+        let mut pending_write_with_imm: VecDeque<RdmaWriteReq> = VecDeque::new();
         let mr_table = self.mr_table.clone_arc();
         let abort_signal = Arc::new(AtomicBool::new(false));
         let abort_signal_c = Arc::clone(&abort_signal);
@@ -224,7 +224,28 @@ impl VerbsOps for MockDeviceCtx {
                 debug!("recv task: {task:?}");
                 match task {
                     LocalTask::PostRecv(req) => {
-                        recv_reqs.push_back(req);
+                        // Check if there are pending WRITE_WITH_IMM messages
+                        if let Some(pending) = pending_write_with_imm.pop_front() {
+                            // Process queued WRITE_WITH_IMM with this RecvWr
+                            log::info!("Processing queued WRITE_WITH_IMM on QPN {qpn}");
+                            write_local_addr(&mr_table, pending.raddr, &pending.data);
+                            if let Some(x) = recv_cq.as_ref() {
+                                let completion = Completion::RecvRdmaWithImm {
+                                    wr_id: req.wr.wr_id,
+                                    imm: pending.imm,
+                                };
+                                info!("new completion, qpn: {qpn}, completion: {completion:?}");
+                                x.push(completion);
+                            }
+                            let resp = WriteOrSendResp {
+                                wr_id: pending.wr_id,
+                                ack_req: pending.ack_req,
+                            };
+                            conn_c.send(QpTransportMessage::WriteResp(resp));
+                        } else {
+                            // No pending messages, queue RecvWr normally
+                            recv_reqs.push_back(req);
+                        }
                     }
                 }
             }
@@ -252,21 +273,28 @@ impl VerbsOps for MockDeviceCtx {
                     let resp = WriteOrSendResp { wr_id, ack_req };
                     conn_c.send(QpTransportMessage::WriteResp(resp));
                 }
-                QpTransportMessage::WriteWithImmReq(RdmaWriteReq {
-                    raddr,
-                    imm,
-                    data,
-                    wr_id,
-                    ack_req,
-                }) => {
-                    write_local_addr(&mr_table, raddr, &data);
-                    if let Some(x) = recv_cq.as_ref() {
-                        let completion = Completion::RecvRdmaWithImm { imm };
-                        info!("new completion, qpn: {qpn}, completion: {completion:?}");
-                        x.push(completion);
+                QpTransportMessage::WriteWithImmReq(req) => {
+                    if let Some(recv_req) = recv_reqs.pop_front() {
+                        // RecvWr available, process immediately
+                        write_local_addr(&mr_table, req.raddr, &req.data);
+                        if let Some(x) = recv_cq.as_ref() {
+                            let completion = Completion::RecvRdmaWithImm {
+                                wr_id: recv_req.wr.wr_id,
+                                imm: req.imm,
+                            };
+                            info!("new completion, qpn: {qpn}, completion: {completion:?}");
+                            x.push(completion);
+                        }
+                        let resp = WriteOrSendResp {
+                            wr_id: req.wr_id,
+                            ack_req: req.ack_req,
+                        };
+                        conn_c.send(QpTransportMessage::WriteResp(resp));
+                    } else {
+                        // No RecvWr available, queue for later processing
+                        log::warn!("No RecvWr available for WRITE_WITH_IMM on QPN {qpn}, queuing message");
+                        pending_write_with_imm.push_back(req);
                     }
-                    let resp = WriteOrSendResp { wr_id, ack_req };
-                    conn_c.send(QpTransportMessage::WriteResp(resp));
                 }
                 QpTransportMessage::SendReq(SendReq {
                     wr_id,
@@ -351,6 +379,7 @@ impl VerbsOps for MockDeviceCtx {
             ctx.conn = Some(conn);
             ctx.abort_signal = Some(abort_signal_c);
             ctx.handle = Some(handle);
+            ctx.local_task_tx = Some(tx_for_ctx);
         });
 
         if result.is_none() {
@@ -429,6 +458,7 @@ impl VerbsOps for MockDeviceCtx {
         Ok(self.cq_handle)
     }
 
+    //TODO 需要完善实现
     fn destroy_cq(&mut self, handle: u32) -> crate::error::Result<()> {
         info!("mock destroy cq, handle: {handle}");
 
@@ -514,14 +544,27 @@ impl VerbsOps for MockDeviceCtx {
     }
 
     fn post_recv(&mut self, qpn: u32, wr: RecvWr) -> crate::error::Result<()> {
-        if let Some(tx) = self.qp_local_task_tx.as_ref() {
-            tx.send(LocalTask::PostRecv(PostRecvReq { wr }))
-                .map_err(|e| RdmaError::QpError(format!("Failed to post receive request: {e}",)))?;
+        // 获取指定 QPN 的 sender
+        let result = self.qp_ctx_table.map_qp_mut(qpn, |ctx| {
+            if let Some(tx) = ctx.local_task_tx.as_ref() {
+                tx.send(LocalTask::PostRecv(PostRecvReq { wr }))
+                    .map_err(|e| RdmaError::QpError(
+                        format!("Failed to post receive request for QP {qpn}: {e}")
+                    ))
+            } else {
+                Err(RdmaError::QpError(
+                    format!("Task channel not initialized for QP {qpn}")
+                ))
+            }
+        });
 
-            info!("post recv wr: {wr:?}, qpn: {qpn}");
-            Ok(())
-        } else {
-            Err(RdmaError::QpError("Task channel not initialized".into()))
+        match result {
+            Some(Ok(())) => {
+                info!("post recv wr: {wr:?}, qpn: {qpn}");
+                Ok(())
+            }
+            Some(Err(e)) => Err(e),
+            None => Err(RdmaError::QpError(format!("QP {qpn} not found"))),
         }
     }
 
@@ -543,6 +586,10 @@ impl VerbsOps for MockDeviceCtx {
 }
 
 fn read_local_addr(addr: u64, len: usize) -> Vec<u8> {
+    // Handle zero-length reads to avoid undefined behavior with null pointers
+    if len == 0 {
+        return Vec::new();
+    }
     let mut data = vec![0u8; len];
     let slice = unsafe { std::slice::from_raw_parts(addr as *const u8, len) };
     data.copy_from_slice(slice);
@@ -551,6 +598,10 @@ fn read_local_addr(addr: u64, len: usize) -> Vec<u8> {
 
 #[cfg(test)]
 fn write_local_addr(table: &MrTable, addr: u64, data: &[u8]) {
+    // Handle zero-length writes to avoid undefined behavior with null pointers
+    if data.is_empty() {
+        return;
+    }
     unsafe {
         ptr::copy_nonoverlapping(data.as_ptr(), addr as *mut u8, data.len());
     }
@@ -558,6 +609,10 @@ fn write_local_addr(table: &MrTable, addr: u64, data: &[u8]) {
 
 #[cfg(not(test))]
 fn write_local_addr(table: &MrTable, addr: u64, data: &[u8]) {
+    // Handle zero-length writes to avoid undefined behavior with null pointers
+    if data.is_empty() {
+        return;
+    }
     if table.valid(addr, data.len()) {
         debug!("valid mr, addr: {addr:x}, length: {}", data.len());
         unsafe {
@@ -957,6 +1012,15 @@ mod tests {
         handshake(&mut dev0, &dev1);
         handshake(&mut dev1, &dev0);
 
+        // Post receive buffer for RDMA_WRITE_WITH_IMM (num_sge = 0)
+        let recv_wr = RecvWr {
+            wr_id: 0,
+            addr: 0,
+            length: 0,
+            lkey: 0,
+        };
+        dev1.dev.post_recv(dev1.qpn, recv_wr).unwrap();
+
         let buf0 = Box::new([1u8; 128]);
         let buf1 = Box::new([0u8; 128]);
         let wr_base = SendWrBase::new(
@@ -986,6 +1050,17 @@ mod tests {
         let mut dev1 = create_dev(Ipv4Addr::new(127, 0, 0, 2));
         handshake(&mut dev0, &dev1);
         handshake(&mut dev1, &dev0);
+
+        // Post receive buffers for RDMA_WRITE_WITH_IMM (num_sge = 0)
+        for i in 0..NUM_WRITES {
+            let recv_wr = RecvWr {
+                wr_id: i as u64,
+                addr: 0,
+                length: 0,
+                lkey: 0,
+            };
+            dev1.dev.post_recv(dev1.qpn, recv_wr).unwrap();
+        }
 
         let buf0 = Box::new([1u8; 128]);
         let buf1 = Box::new([0u8; 128]);

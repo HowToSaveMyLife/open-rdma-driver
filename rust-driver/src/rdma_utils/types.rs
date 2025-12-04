@@ -22,13 +22,32 @@ impl SendWr {
     pub(crate) fn new(wr: ibv_send_wr) -> crate::error::Result<Self> {
         let num_sge = usize::try_from(wr.num_sge)
             .map_err(|e| RdmaError::InvalidInput(format!("Invalid SGE count: {e}")))?;
-        if num_sge != 1 {
-            return Err(RdmaError::Unimplemented(
-                "Only support for single SGE".into(),
-            ));
+
+        if num_sge > 1 {
+            return Err(RdmaError::Unimplemented(format!(
+                "Only 0 or 1 SGE supported, got {}",
+                num_sge
+            )));
         }
-        // SAFETY: sg_list is valid when num_sge > 0, which we've verified above
-        let sge = unsafe { *wr.sg_list };
+
+        // Extract SGE information, handling num_sge = 0 case
+        let (laddr, length, lkey) = if num_sge == 1 {
+            // SAFETY: sg_list is valid when num_sge > 0
+            let sge = unsafe { *wr.sg_list };
+            (sge.addr, sge.length, sge.lkey)
+        } else {
+            // num_sge = 0: Zero-byte operation (e.g., RDMA_WRITE_WITH_IMM with immediate data only)
+            (0, 0, 0)
+        };
+
+        //TODO
+        #[cfg(not(feature = "mock"))]
+        {
+            if num_sge == 0 {
+                todo!("need to impl num_sge == 0")
+            }
+        }
+
         let opcode = match wr.opcode {
             IBV_WR_RDMA_WRITE => WorkReqOpCode::RdmaWrite,
             IBV_WR_RDMA_WRITE_WITH_IMM => WorkReqOpCode::RdmaWriteWithImm,
@@ -46,9 +65,9 @@ impl SendWr {
         let base = SendWrBase {
             wr_id: wr.wr_id,
             send_flags: wr.send_flags,
-            laddr: sge.addr,
-            length: sge.length,
-            lkey: sge.lkey,
+            laddr,
+            length,
+            lkey,
             // SAFETY: imm_data is valid for operations with immediate data
             imm_data: unsafe { wr.__bindgen_anon_1.imm_data },
             opcode,
@@ -313,19 +332,33 @@ impl RecvWr {
     #[allow(unsafe_code)]
     pub(crate) fn new(wr: ibverbs_sys::ibv_recv_wr) -> Option<Self> {
         let num_sge = usize::try_from(wr.num_sge).ok()?;
-        if num_sge != 1 {
-            log::warn!("num_sge != 1 !!!!!!!!!!!!!!!!!!!!!!!，num sge is {}", num_sge);
-            return None;
-        }
-        // SAFETY: sg_list is valid when num_sge > 0, which we've verified above
-        let sge = unsafe { *wr.sg_list };
 
-        Some(Self {
-            wr_id: wr.wr_id,
-            addr: sge.addr,
-            length: sge.length,
-            lkey: sge.lkey,
-        })
+        match num_sge {
+            0 => {
+                // Support num_sge = 0 for receiving RDMA_WRITE_WITH_IMM with immediate data only
+                Some(Self {
+                    wr_id: wr.wr_id,
+                    addr: 0, // No buffer needed
+                    length: 0,
+                    lkey: 0,
+                })
+            }
+            1 => {
+                // Normal receive with buffer
+                // SAFETY: sg_list is valid when num_sge > 0, which we've verified above
+                let sge = unsafe { *wr.sg_list };
+                Some(Self {
+                    wr_id: wr.wr_id,
+                    addr: sge.addr,
+                    length: sge.length,
+                    lkey: sge.lkey,
+                })
+            }
+            _ => {
+                log::error!("Only 0 or 1 SGE supported, got {}", num_sge);
+                None
+            }
+        }
     }
 
     pub(crate) fn to_bytes(self) -> [u8; size_of::<RecvWr>()] {

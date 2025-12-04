@@ -437,7 +437,7 @@ unsafe impl RdmaCtxOps for BlueRdmaCore {
         let qp_num = qp.qp_num;
         let bluerdma = unsafe { get_device(context) };
         let Some(recv_wr) = RecvWr::new(wr) else {
-            error!("Invalid receive WR: only single SGE is supported (num_sge must be 1)");
+            error!("Invalid receive WR: only 0 or 1 SGE is supported (num_sge must be 0 or 1)");
             unsafe { *bad_wr = wr_ptr };
             return libc::EINVAL;
         };
@@ -479,7 +479,8 @@ unsafe impl RdmaCtxOps for BlueRdmaCore {
                             wc.__bindgen_anon_1.imm_data = imm;
                         }
                     }
-                    Completion::RecvRdmaWithImm { imm } => {
+                    Completion::RecvRdmaWithImm { wr_id, imm } => {
+                        wc.wr_id = wr_id;
                         wc.__bindgen_anon_1.imm_data = imm;
                     }
                 }
