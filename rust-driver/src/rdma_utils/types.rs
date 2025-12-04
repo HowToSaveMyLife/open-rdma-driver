@@ -8,7 +8,11 @@ use ibverbs_sys::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{workers::send::WorkReqOpCode, RdmaError};
+use crate::{
+    types::{RemoteAddr, VirtAddr},
+    workers::send::WorkReqOpCode,
+    RdmaError,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum SendWr {
@@ -65,7 +69,7 @@ impl SendWr {
         let base = SendWrBase {
             wr_id: wr.wr_id,
             send_flags: wr.send_flags,
-            laddr,
+            laddr: VirtAddr::new(laddr),
             length,
             lkey,
             // SAFETY: imm_data is valid for operations with immediate data
@@ -78,7 +82,7 @@ impl SendWr {
                 let wr = SendWrRdma {
                     base,
                     // SAFETY: rdma field is valid for RDMA operations
-                    raddr: unsafe { wr.wr.rdma.remote_addr },
+                    raddr: RemoteAddr::new(unsafe { wr.wr.rdma.remote_addr }),
                     rkey: unsafe { wr.wr.rdma.rkey },
                 };
                 Ok(Self::Rdma(wr))
@@ -101,7 +105,7 @@ impl SendWr {
         }
     }
 
-    pub(crate) fn laddr(&self) -> u64 {
+    pub(crate) fn laddr(&self) -> VirtAddr {
         match *self {
             SendWr::Rdma(wr) => wr.base.laddr,
             SendWr::Send(wr) => wr.laddr,
@@ -146,7 +150,7 @@ impl From<SendWrBase> for SendWr {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SendWrRdma {
     pub(crate) base: SendWrBase,
-    pub(crate) raddr: u64,
+    pub(crate) raddr: RemoteAddr,
     pub(crate) rkey: u32,
 }
 
@@ -200,7 +204,7 @@ impl SendWrRdma {
             base: SendWrBase {
                 wr_id: wr.wr_id,
                 send_flags: wr.send_flags,
-                laddr: sge.addr,
+                laddr: VirtAddr::new(sge.addr),
                 length: sge.length,
                 lkey: sge.lkey,
                 // SAFETY: imm_data is valid for operations with immediate data
@@ -208,18 +212,18 @@ impl SendWrRdma {
                 opcode,
             },
             // SAFETY: rdma field is valid for RDMA operations
-            raddr: unsafe { wr.wr.rdma.remote_addr },
+            raddr: RemoteAddr::new(unsafe { wr.wr.rdma.remote_addr }),
             rkey: unsafe { wr.wr.rdma.rkey },
         })
     }
 
-    pub(crate) fn new_from_base(base: SendWrBase, raddr: u64, rkey: u32) -> SendWrRdma {
+    pub(crate) fn new_from_base(base: SendWrBase, raddr: RemoteAddr, rkey: u32) -> SendWrRdma {
         Self { base, raddr, rkey }
     }
 
     /// Returns the local address of the SGE buffer
     #[inline]
-    pub(crate) fn laddr(&self) -> u64 {
+    pub(crate) fn laddr(&self) -> VirtAddr {
         self.base.laddr
     }
 
@@ -237,7 +241,7 @@ impl SendWrRdma {
 
     /// Returns the remote memory address for RDMA operations
     #[inline]
-    pub(crate) fn raddr(&self) -> u64 {
+    pub(crate) fn raddr(&self) -> RemoteAddr {
         self.raddr
     }
 
@@ -274,7 +278,7 @@ impl SendWrRdma {
 pub(crate) struct SendWrBase {
     pub(crate) wr_id: u64,
     pub(crate) send_flags: u32,
-    pub(crate) laddr: u64,
+    pub(crate) laddr: VirtAddr,
     pub(crate) length: u32,
     pub(crate) lkey: u32,
     pub(crate) imm_data: u32,
@@ -299,7 +303,7 @@ impl SendWrBase {
     pub(crate) fn new(
         wr_id: u64,
         send_flags: u32,
-        laddr: u64,
+        laddr: VirtAddr,
         length: u32,
         lkey: u32,
         imm_data: u32,
@@ -323,7 +327,7 @@ impl SendWrBase {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Encode, Decode, PartialEq, Eq)]
 pub(crate) struct RecvWr {
     pub(crate) wr_id: u64,
-    pub(crate) addr: u64,
+    pub(crate) addr: VirtAddr,
     pub(crate) length: u32,
     pub(crate) lkey: u32,
 }
@@ -338,7 +342,7 @@ impl RecvWr {
                 // Support num_sge = 0 for receiving RDMA_WRITE_WITH_IMM with immediate data only
                 Some(Self {
                     wr_id: wr.wr_id,
-                    addr: 0, // No buffer needed
+                    addr: VirtAddr::new(0), // No buffer needed
                     length: 0,
                     lkey: 0,
                 })
@@ -349,7 +353,7 @@ impl RecvWr {
                 let sge = unsafe { *wr.sg_list };
                 Some(Self {
                     wr_id: wr.wr_id,
-                    addr: sge.addr,
+                    addr: VirtAddr::new(sge.addr),
                     length: sge.length,
                     lkey: sge.lkey,
                 })
@@ -364,7 +368,7 @@ impl RecvWr {
     pub(crate) fn to_bytes(self) -> [u8; size_of::<RecvWr>()] {
         let mut bytes = [0u8; 24];
         bytes[0..8].copy_from_slice(&self.wr_id.to_be_bytes());
-        bytes[8..16].copy_from_slice(&self.addr.to_be_bytes());
+        bytes[8..16].copy_from_slice(&self.addr.as_u64().to_be_bytes());
         bytes[16..20].copy_from_slice(&self.length.to_be_bytes());
         bytes[20..24].copy_from_slice(&self.lkey.to_be_bytes());
         bytes
@@ -374,7 +378,7 @@ impl RecvWr {
     pub(crate) fn from_bytes(bytes: &[u8; size_of::<RecvWr>()]) -> Self {
         Self {
             wr_id: u64::from_be_bytes(bytes[0..8].try_into().unwrap()),
-            addr: u64::from_be_bytes(bytes[8..16].try_into().unwrap()),
+            addr: VirtAddr::new(u64::from_be_bytes(bytes[8..16].try_into().unwrap())),
             length: u32::from_be_bytes(bytes[16..20].try_into().unwrap()),
             lkey: u32::from_be_bytes(bytes[20..24].try_into().unwrap()),
         }

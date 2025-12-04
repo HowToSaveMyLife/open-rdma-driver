@@ -26,6 +26,7 @@ use std::{
 use crate::{
     csr::DeviceAdaptor,
     error::{RdmaError, Result},
+    types::{PhysAddr, VirtAddr},
     rdma_utils::{
         pd::PdTable,
         qp::{QpManager, QpTable},
@@ -89,7 +90,7 @@ impl DmaBufAllocator for MockDmaBufAllocator {
         }
 
         let mmap = MmapMut::new(ptr, usize::MAX);
-        Ok(DmaBuf::new(mmap, 0))
+        Ok(DmaBuf::new(mmap, PhysAddr::new(0)))
     }
 }
 
@@ -97,18 +98,18 @@ impl DmaBufAllocator for MockDmaBufAllocator {
 pub(crate) struct MockUmemHandler;
 
 impl MemoryPinner for MockUmemHandler {
-    fn pin_pages(&self, addr: u64, length: usize) -> io::Result<()> {
+    fn pin_pages(&self, _addr: VirtAddr, _length: usize) -> io::Result<()> {
         Ok(())
     }
 
-    fn unpin_pages(&self, addr: u64, length: usize) -> io::Result<()> {
+    fn unpin_pages(&self, _addr: VirtAddr, _length: usize) -> io::Result<()> {
         Ok(())
     }
 }
 
 impl AddressResolver for MockUmemHandler {
-    fn virt_to_phys(&self, virt_addr: u64) -> io::Result<Option<u64>> {
-        Ok(Some(0))
+    fn virt_to_phys(&self, _virt_addr: VirtAddr) -> io::Result<Option<PhysAddr>> {
+        Ok(Some(PhysAddr::new(0)))
     }
 }
 
@@ -172,7 +173,7 @@ impl VerbsOps for MockDeviceCtx {
         access: u8,
     ) -> crate::error::Result<u32> {
         let addr_resolver = PhysAddrResolverLinuxX86;
-        let pa = addr_resolver.virt_to_phys(addr).map_err(|e| {
+        let pa = addr_resolver.virt_to_phys(VirtAddr::new(addr)).map_err(|e| {
             RdmaError::MemoryError(format!("Failed to resolve physical address: {e}",))
         })?;
 
@@ -310,7 +311,7 @@ impl VerbsOps for MockDeviceCtx {
                         })
                         .expect("No receive request available");
 
-                    write_local_addr(&mr_table, req.wr.addr, &data);
+                    write_local_addr(&mr_table, req.wr.addr.as_u64(), &data);
                     if let Some(x) = recv_cq.as_ref() {
                         let completion = Completion::Recv { wr_id, imm };
                         info!("new completion, qpn: {qpn}, completion: {completion:?}");
@@ -486,9 +487,9 @@ impl VerbsOps for MockDeviceCtx {
         let to_send = match wr {
             SendWr::Rdma(x) => match x.opcode() {
                 WorkReqOpCode::RdmaWrite => {
-                    let data = read_local_addr(x.laddr(), x.length() as usize);
+                    let data = read_local_addr(x.laddr().as_u64(), x.length() as usize);
                     QpTransportMessage::WriteReq(RdmaWriteReq {
-                        raddr: x.raddr(),
+                        raddr: x.raddr().as_u64(),
                         imm: x.imm(),
                         wr_id: x.wr_id(),
                         data,
@@ -496,9 +497,9 @@ impl VerbsOps for MockDeviceCtx {
                     })
                 }
                 WorkReqOpCode::RdmaWriteWithImm => {
-                    let data = read_local_addr(x.laddr(), x.length() as usize);
+                    let data = read_local_addr(x.laddr().as_u64(), x.length() as usize);
                     QpTransportMessage::WriteWithImmReq(RdmaWriteReq {
-                        raddr: x.raddr(),
+                        raddr: x.raddr().as_u64(),
                         imm: x.imm(),
                         wr_id: x.wr_id(),
                         data,
@@ -506,10 +507,10 @@ impl VerbsOps for MockDeviceCtx {
                     })
                 }
                 WorkReqOpCode::RdmaRead => QpTransportMessage::ReadReq(RdmaReadReq {
-                    raddr: x.raddr(),
+                    raddr: x.raddr().as_u64(),
                     wr_id: x.wr_id(),
                     ack_req,
-                    laddr: x.laddr(),
+                    laddr: x.laddr().as_u64(),
                     len: x.length(),
                 }),
                 _ => {
@@ -520,7 +521,7 @@ impl VerbsOps for MockDeviceCtx {
                 }
             },
             SendWr::Send(x) => {
-                let data = read_local_addr(x.laddr, x.length as usize);
+                let data = read_local_addr(x.laddr.as_u64(), x.length as usize);
                 QpTransportMessage::SendReq(SendReq {
                     data,
                     wr_id: wr.wr_id(),
@@ -913,7 +914,10 @@ impl Inner {
 
 #[cfg(test)]
 mod tests {
-    use crate::rdma_utils::types::{SendWrBase, SendWrRdma};
+    use crate::{
+        rdma_utils::types::{SendWrBase, SendWrRdma},
+        types::{RemoteAddr, VirtAddr},
+    };
 
     use super::*;
     use bincode::{Decode, Encode};
@@ -993,13 +997,17 @@ mod tests {
         let wr_base = SendWrBase::new(
             0,
             0,
-            buf0.as_ptr() as u64,
+            VirtAddr::new(buf0.as_ptr() as u64),
             buf0.len() as u32,
             0,
             0,
             WorkReqOpCode::RdmaWrite,
         );
-        let wr = SendWrRdma::new_from_base(wr_base, buf1.as_ptr() as u64, buf1.len() as u32);
+        let wr = SendWrRdma::new_from_base(
+            wr_base,
+            RemoteAddr::new(buf1.as_ptr() as u64),
+            buf1.len() as u32,
+        );
         dev0.dev.post_send(dev0.qpn, wr.into());
         thread::sleep(Duration::from_millis(10));
         assert!(buf1.iter().all(|x| *x == 1));
@@ -1015,7 +1023,7 @@ mod tests {
         // Post receive buffer for RDMA_WRITE_WITH_IMM (num_sge = 0)
         let recv_wr = RecvWr {
             wr_id: 0,
-            addr: 0,
+            addr: VirtAddr::new(0),
             length: 0,
             lkey: 0,
         };
@@ -1026,13 +1034,13 @@ mod tests {
         let wr_base = SendWrBase::new(
             0,
             ibverbs_sys::ibv_send_flags::IBV_SEND_SIGNALED.0,
-            buf0.as_ptr() as u64,
+            VirtAddr::new(buf0.as_ptr() as u64),
             buf0.len() as u32,
             0,
             0,
             WorkReqOpCode::RdmaWriteWithImm,
         );
-        let wr = SendWrRdma::new_from_base(wr_base, buf1.as_ptr() as u64, buf1.len() as u32);
+        let wr = SendWrRdma::new_from_base(wr_base, RemoteAddr::new(buf1.as_ptr() as u64), buf1.len() as u32);
         dev0.dev.post_send(dev0.qpn, wr.into());
         thread::sleep(Duration::from_millis(10));
         assert!(buf1.iter().all(|x| *x == 1));
@@ -1055,7 +1063,7 @@ mod tests {
         for i in 0..NUM_WRITES {
             let recv_wr = RecvWr {
                 wr_id: i as u64,
-                addr: 0,
+                addr: VirtAddr::new(0),
                 length: 0,
                 lkey: 0,
             };
@@ -1067,14 +1075,14 @@ mod tests {
         let wr_base = SendWrBase::new(
             0,
             ibverbs_sys::ibv_send_flags::IBV_SEND_SIGNALED.0,
-            buf0.as_ptr() as u64,
+            VirtAddr::new(buf0.as_ptr() as u64),
             buf0.len() as u32,
             0,
             0,
             WorkReqOpCode::RdmaWriteWithImm,
         );
         for _ in 0..NUM_WRITES {
-            let wr = SendWrRdma::new_from_base(wr_base, buf1.as_ptr() as u64, buf1.len() as u32);
+            let wr = SendWrRdma::new_from_base(wr_base, RemoteAddr::new(buf1.as_ptr() as u64), buf1.len() as u32);
             dev0.dev.post_send(dev0.qpn, wr.into());
         }
         thread::sleep(Duration::from_millis(10));
@@ -1099,13 +1107,13 @@ mod tests {
         let wr_base = SendWrBase::new(
             0,
             0,
-            buf0.as_ptr() as u64,
+            VirtAddr::new(buf0.as_ptr() as u64),
             buf0.len() as u32,
             0,
             0,
             WorkReqOpCode::RdmaRead,
         );
-        let wr = SendWrRdma::new_from_base(wr_base, buf1.as_ptr() as u64, buf1.len() as u32);
+        let wr = SendWrRdma::new_from_base(wr_base, RemoteAddr::new(buf1.as_ptr() as u64), buf1.len() as u32);
         dev0.dev.post_send(dev0.qpn, wr.into());
         thread::sleep(Duration::from_millis(10));
         assert!(buf0.iter().all(|x| *x == 1));
@@ -1123,13 +1131,13 @@ mod tests {
         let wr_base = SendWrBase::new(
             0,
             ibverbs_sys::ibv_send_flags::IBV_SEND_SIGNALED.0,
-            buf0.as_ptr() as u64,
+            VirtAddr::new(buf0.as_ptr() as u64),
             buf0.len() as u32,
             0,
             0,
             WorkReqOpCode::RdmaRead,
         );
-        let wr = SendWrRdma::new_from_base(wr_base, buf1.as_ptr() as u64, buf1.len() as u32);
+        let wr = SendWrRdma::new_from_base(wr_base, RemoteAddr::new(buf1.as_ptr() as u64), buf1.len() as u32);
         dev0.dev.post_send(dev0.qpn, wr.into());
         thread::sleep(Duration::from_millis(10));
         assert!(buf0.iter().all(|x| *x == 1));
@@ -1149,7 +1157,7 @@ mod tests {
 
         let recv_wr = RecvWr {
             wr_id: 0,
-            addr: buf1.as_ptr() as u64,
+            addr: VirtAddr::new(buf1.as_ptr() as u64),
             length: buf1.len() as u32,
             lkey: 0,
         };
@@ -1158,7 +1166,7 @@ mod tests {
         let wr = SendWrBase::new(
             0,
             0,
-            buf0.as_ptr() as u64,
+            VirtAddr::new(buf0.as_ptr() as u64),
             buf0.len() as u32,
             0,
             0,
@@ -1183,7 +1191,7 @@ mod tests {
 
         let recv_wr = RecvWr {
             wr_id: 0,
-            addr: buf1.as_ptr() as u64,
+            addr: VirtAddr::new(buf1.as_ptr() as u64),
             length: buf1.len() as u32,
             lkey: 0,
         };
@@ -1192,7 +1200,7 @@ mod tests {
         let wr = SendWrBase::new(
             0,
             ibverbs_sys::ibv_send_flags::IBV_SEND_SIGNALED.0,
-            buf0.as_ptr() as u64,
+            VirtAddr::new(buf0.as_ptr() as u64),
             buf0.len() as u32,
             0,
             0,
@@ -1222,7 +1230,7 @@ mod tests {
         for _ in 0..NUM_SEND_RECV {
             let recv_wr = RecvWr {
                 wr_id: 0,
-                addr: buf1.as_ptr() as u64,
+                addr: VirtAddr::new(buf1.as_ptr() as u64),
                 length: buf1.len() as u32,
                 lkey: 0,
             };
@@ -1233,7 +1241,7 @@ mod tests {
             let wr = SendWrBase::new(
                 0,
                 ibverbs_sys::ibv_send_flags::IBV_SEND_SIGNALED.0,
-                buf0.as_ptr() as u64,
+                VirtAddr::new(buf0.as_ptr() as u64),
                 buf0.len() as u32,
                 0,
                 0,

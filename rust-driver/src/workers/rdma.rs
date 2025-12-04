@@ -133,7 +133,13 @@ impl RdmaWriteWorker {
                 wr.lkey(),
                 wr.imm(),
             )
-            .set_chunk_meta(psn, wr.laddr(), wr.raddr(), wr.length(), ChunkPos::Only)
+            .set_chunk_meta(
+                psn,
+                wr.laddr().as_u64(),
+                wr.raddr().as_u64(),
+                wr.length(),
+                ChunkPos::Only,
+            )
             .build();
         let flags = wr.send_flags();
         let mut ack_req = false;
@@ -178,8 +184,8 @@ impl RdmaWriteWorker {
 
         let addr = wr.raddr();
         let length = wr.length();
-        let num_psn =
-            num_psn(qp.pmtu, addr, length).ok_or(io::Error::from(io::ErrorKind::InvalidInput))?;
+        let num_psn = num_psn(qp.pmtu, addr.as_u64(), length)
+            .ok_or(io::Error::from(io::ErrorKind::InvalidInput))?;
         let (msn, psn) = self
             .sq_ctx_table
             .get_qp_mut(qpn)
@@ -297,10 +303,12 @@ mod tests {
     }
 
     fn create_test_send_wr_rdma(opcode: WorkReqOpCode) -> SendWrRdma {
+        use crate::types::{RemoteAddr, VirtAddr};
+
         let base = SendWrBase {
             wr_id: 123,
             send_flags: 0,
-            laddr: 0x1000,
+            laddr: VirtAddr::new(0x1000),
             length: 1024,
             lkey: 0x456,
             imm_data: 0,
@@ -308,7 +316,7 @@ mod tests {
         };
         SendWrRdma {
             base,
-            raddr: 0x2000,
+            raddr: RemoteAddr::new(0x2000),
             rkey: 0x789,
         }
     }

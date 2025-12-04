@@ -6,7 +6,7 @@ use std::{
     ptr,
 };
 
-use crate::constants::U_DMA_BUF_CLASS_PATH;
+use crate::{constants::U_DMA_BUF_CLASS_PATH, types::PhysAddr};
 
 use super::{
     page::{ContiguousPages, MmapMut, PageAllocator},
@@ -85,7 +85,8 @@ impl UDmaBufAllocator {
         }
 
         let mmap = MmapMut::new(ptr, len);
-        let phys_addr = Self::phys_addr()? + self.offset as u64;
+        let phys_addr_raw = Self::phys_addr()? + self.offset as u64;
+        let phys_addr = PhysAddr::new(phys_addr_raw);
 
         self.offset += len;
 

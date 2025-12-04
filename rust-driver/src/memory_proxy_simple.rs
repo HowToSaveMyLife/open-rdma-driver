@@ -13,6 +13,8 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::fmt::Error;
 use std::io::BufRead;
+
+use crate::types::{PhysAddr, VirtAddr};
 use std::io::BufReader;
 use std::io::Write;
 use std::net::SocketAddr;
@@ -36,7 +38,7 @@ pub(crate) struct SimpleMemRequest {
     pub channel_id: u32,
 
     /// Physical address (as integer, not hex string)
-    pub address: u64,
+    pub address: PhysAddr,
 
     /// Length of data in bytes
     pub length: usize,
@@ -251,7 +253,7 @@ impl SimpleMemoryProxyClient {
             remain_len >= req.length,
             "Not enough contiguous memory for read request"
         );
-        let vir_addr = vir_addr as *const u8;
+        let vir_addr = vir_addr.as_ptr::<u8>();
 
         let mut data = Vec::with_capacity(req.length);
 
@@ -291,7 +293,7 @@ impl SimpleMemoryProxyClient {
             "Not enough contiguous memory for read request"
         );
 
-        let vir_addr = vir_addr as *mut u8;
+        let vir_addr = vir_addr.as_mut_ptr::<u8>();
 
         for (i, byte) in req.data.unwrap().iter().enumerate() {
             unsafe {
@@ -310,7 +312,7 @@ mod tests {
         let request = SimpleMemRequest {
             request_type: "mem_read".to_string(),
             channel_id: 0,
-            address: 0x1000,
+            address: PhysAddr::new(0x1000),
             length: 64,
             data: None,
             start_byte_index: Some(0),
@@ -324,7 +326,7 @@ mod tests {
 
         assert_eq!(parsed.request_type, "mem_read");
         assert_eq!(parsed.channel_id, 0);
-        assert_eq!(parsed.address, 0x1000);
+        assert_eq!(parsed.address, PhysAddr::new(0x1000));
         assert_eq!(parsed.length, 64);
     }
     #[test]
@@ -341,7 +343,7 @@ mod tests {
         let write_req: SimpleMemRequest = serde_json::from_str(write_json).unwrap();
         assert_eq!(write_req.request_type, "mem_write");
         assert_eq!(write_req.channel_id, 0);
-        assert_eq!(write_req.address, 4096);
+        assert_eq!(write_req.address.as_u64(), 4096);
         assert_eq!(write_req.length, 4);
         assert_eq!(write_req.data.unwrap(), vec![0xaa, 0xbb, 0xcc, 0xdd]);
 
@@ -360,7 +362,7 @@ mod tests {
         let read_req: SimpleMemRequest = serde_json::from_str(read_json).unwrap();
         assert_eq!(read_req.request_type, "mem_read");
         assert_eq!(read_req.channel_id, 1);
-        assert_eq!(read_req.address, 8192);
+        assert_eq!(read_req.address.as_u64(), 8192);
         assert_eq!(read_req.length, 32);
         assert_eq!(read_req.start_byte_index, Some(0));
         assert_eq!(read_req.is_first, Some(true));
@@ -418,7 +420,7 @@ mod tests {
         let request = SimpleMemRequest {
             request_type: "mem_write".to_string(),
             channel_id: 0,
-            address: 0x8000,
+            address: PhysAddr::new(0x8000),
             length: 8,
             data: Some(vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]),
             start_byte_index: None,
@@ -432,7 +434,7 @@ mod tests {
 
         assert_eq!(parsed.request_type, "mem_write");
         assert_eq!(parsed.channel_id, 0);
-        assert_eq!(parsed.address, 0x8000);
+        assert_eq!(parsed.address.as_u64(), 0x8000);
         assert_eq!(parsed.length, 8);
         assert_eq!(parsed.data.unwrap().len(), 8);
 
@@ -450,7 +452,7 @@ mod tests {
         let request = SimpleMemRequest {
             request_type: "mem_read".to_string(),
             channel_id: 2,
-            address: 0x10000,
+            address: PhysAddr::new(0x10000),
             length: 64,
             data: None,
             start_byte_index: Some(4),
@@ -464,7 +466,7 @@ mod tests {
 
         assert_eq!(parsed.request_type, "mem_read");
         assert_eq!(parsed.channel_id, 2);
-        assert_eq!(parsed.address, 0x10000);
+        assert_eq!(parsed.address.as_u64(), 0x10000);
         assert_eq!(parsed.length, 64);
         assert_eq!(parsed.start_byte_index, Some(4));
         assert_eq!(parsed.is_first, Some(false));
@@ -507,7 +509,7 @@ mod tests {
         let request = SimpleMemRequest {
             request_type: "mem_write".to_string(),
             channel_id: 0,
-            address: 0x1000,
+            address: PhysAddr::new(0x1000),
             length: 4,
             data: Some(vec![0xff, 0xee, 0xdd, 0xcc]),
             start_byte_index: None,
@@ -541,7 +543,7 @@ mod tests {
         let request1 = SimpleMemRequest {
             request_type: "mem_write".to_string(),
             channel_id: 0,
-            address: 0x1000,
+            address: PhysAddr::new(0x1000),
             length: 4,
             data: Some(vec![0x11, 0x22, 0x33, 0x44]),
             start_byte_index: None,
@@ -553,7 +555,7 @@ mod tests {
         let request2 = SimpleMemRequest {
             request_type: "mem_read".to_string(),
             channel_id: 1,
-            address: 0x2000,
+            address: PhysAddr::new(0x2000),
             length: 8,
             data: None,
             start_byte_index: Some(0),
@@ -576,12 +578,12 @@ mod tests {
         let parsed1: SimpleMemRequest = serde_json::from_str(lines[0]).unwrap();
         assert_eq!(parsed1.request_type, "mem_write");
         assert_eq!(parsed1.channel_id, 0);
-        assert_eq!(parsed1.address, 0x1000);
+        assert_eq!(parsed1.address, PhysAddr::new(0x1000));
 
         let parsed2: SimpleMemRequest = serde_json::from_str(lines[1]).unwrap();
         assert_eq!(parsed2.request_type, "mem_read");
         assert_eq!(parsed2.channel_id, 1);
-        assert_eq!(parsed2.address, 0x2000);
+        assert_eq!(parsed2.address, PhysAddr::new(0x2000));
         assert_eq!(parsed2.request_id.unwrap(), "req_1_0");
     }
 
@@ -592,7 +594,7 @@ mod tests {
         let request = SimpleMemRequest {
             request_type: "mem_write".to_string(),
             channel_id: 0,
-            address: 0xdead_beef,
+            address: PhysAddr::new(0xdead_beef),
             length: 4,
             data: Some(vec![0x00, 0x01, 0x02, 0x03]),
             start_byte_index: None,

@@ -11,9 +11,12 @@ use log::debug;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
-use crate::rdma_utils::{
-    qp::{qpn_to_index, QpTable},
-    types::RecvWr,
+use crate::{
+    rdma_utils::{
+        qp::{qpn_to_index, QpTable},
+        types::RecvWr,
+    },
+    types::VirtAddr,
 };
 
 pub(crate) trait PostRecvChannel {
@@ -232,7 +235,7 @@ mod tests {
 
         let test_wr = RecvWr {
             wr_id: 12345,
-            addr: 0x1000,
+            addr: VirtAddr::new(0x1000),
             length: 1024,
             lkey: 0x5678,
         };
@@ -266,19 +269,19 @@ mod tests {
         let test_wrs = vec![
             RecvWr {
                 wr_id: 1,
-                addr: 0x1000,
+                addr: VirtAddr::new(0x1000),
                 length: 100,
                 lkey: 0x1111,
             },
             RecvWr {
                 wr_id: 2,
-                addr: 0x2000,
+                addr: VirtAddr::new(0x2000),
                 length: 200,
                 lkey: 0x2222,
             },
             RecvWr {
                 wr_id: 3,
-                addr: 0x3000,
+                addr: VirtAddr::new(0x3000),
                 length: 300,
                 lkey: 0x3333,
             },

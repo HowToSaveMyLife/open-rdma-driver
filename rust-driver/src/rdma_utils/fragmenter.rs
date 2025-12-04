@@ -1,5 +1,6 @@
 use crate::{
     constants::{PSN_MASK, WR_CHUNK_SIZE},
+    types::VirtAddr,
     workers::send::{ChunkPos, QpParams, WithIbvParams, WrChunk, WrChunkBuilder},
 };
 
@@ -103,7 +104,7 @@ impl IntoIterator for ChunkFragmenter {
         let f = Fragmenter::new(
             self.chunk_size,
             pmtu,
-            self.wr.raddr(),
+            self.wr.raddr().as_u64(),
             self.wr.length().into(),
         );
         IntoIterChunk {
@@ -123,7 +124,7 @@ pub(crate) struct IntoIterChunk {
     psn: Psn,
     wr: SendWrRdma,
     builder: WrChunkBuilder<WithIbvParams>,
-    laddr: u64,
+    laddr: VirtAddr,
     pmtu: u64,
     is_retry: bool,
 }
@@ -133,9 +134,13 @@ impl Iterator for IntoIterChunk {
 
     fn next(&mut self) -> Option<Self::Item> {
         let f = self.inner.next()?;
-        let builder =
-            self.builder
-                .set_chunk_meta(self.psn, self.laddr, f.addr, f.len as u32, f.pos);
+        let builder = self.builder.set_chunk_meta(
+            self.psn,
+            self.laddr.as_u64(),
+            f.addr,
+            f.len as u32,
+            f.pos,
+        );
         let chunk = if self.is_retry {
             builder.set_is_retry().build()
         } else {
@@ -143,7 +148,10 @@ impl Iterator for IntoIterChunk {
         };
         let num_packets = f.len.div_ceil(self.pmtu) as u32;
         self.psn += num_packets;
-        self.laddr += f.len;
+        self.laddr = self
+            .laddr
+            .offset(f.len)
+            .unwrap_or_else(|| unreachable!("address overflow"));
 
         Some(chunk)
     }

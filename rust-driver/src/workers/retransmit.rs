@@ -212,10 +212,12 @@ mod tests {
     }
 
     fn create_test_send_wr() -> SendWrRdma {
+        use crate::types::{RemoteAddr, VirtAddr};
+
         let base = SendWrBase {
             wr_id: 1,
             send_flags: 0,
-            laddr: 0x1000,
+            laddr: VirtAddr::new(0x1000),
             length: 1024,
             lkey: 0x123,
             imm_data: 0,
@@ -223,7 +225,7 @@ mod tests {
         };
         SendWrRdma {
             base,
-            raddr: 0x2000,
+            raddr: RemoteAddr::new(0x2000),
             rkey: 0x456,
         }
     }

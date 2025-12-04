@@ -18,6 +18,7 @@ use crate::{
         qp::QpTable,
         types::{SendWrBase, SendWrRdma},
     },
+    types::{RemoteAddr, VirtAddr},
     workers::{
         ack_responder::AckResponse,
         completion::{CompletionTask, Event, MessageMeta, RecvEvent, RecvEventOp},
@@ -243,13 +244,13 @@ impl MetaHandler {
         let base = SendWrBase::new(
             0,
             flags,
-            meta.raddr,
+            VirtAddr::new(meta.raddr),
             meta.total_len,
             meta.rkey,
             0,
             WorkReqOpCode::RdmaReadResp,
         );
-        let send_wr = SendWrRdma::new_from_base(base, meta.laddr, meta.lkey);
+        let send_wr = SendWrRdma::new_from_base(base, RemoteAddr::new(meta.laddr), meta.lkey);
         let task = RdmaWriteTask::new_write(meta.dqpn, send_wr);
         self.rdma_write_tx.send(task);
 
@@ -570,13 +571,13 @@ mod test {
         let base = SendWrBase::new(
             0,
             ibverbs_sys::ibv_send_flags::IBV_SEND_SOLICITED.0,
-            0x1000,
+            VirtAddr::new(0x1000),
             1024,
             0x2000,
             0,
             WorkReqOpCode::RdmaReadResp,
         );
-        let send_wr = SendWrRdma::new_from_base(base, meta.laddr, meta.lkey);
+        let send_wr = SendWrRdma::new_from_base(base, RemoteAddr::new(meta.laddr), meta.lkey);
         let task = RdmaWriteTask::new_write(meta.dqpn, send_wr);
         rxs.assert_rdma_write(task);
         rxs.assert_ack_timeout(AckTimeoutTask::RecvMeta { qpn });
