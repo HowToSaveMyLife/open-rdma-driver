@@ -99,99 +99,114 @@ static ALLOC_LAYOUT: LazyLock<Mutex<HashMap<usize, Layout>>> =
 static MMAP_ALLOCS: LazyLock<Mutex<HashMap<usize, usize>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-#[unsafe(no_mangle)]
-unsafe extern "C" fn malloc(size: size_t) -> *mut c_void {
-    // log::debug!("malloc called");
-    let layout = Layout::from_size_align(size, 16).unwrap();
-    let ptr = HACK_HEAP.lock().alloc(layout).unwrap().as_ptr() as *mut c_void;
-    ALLOC_LAYOUT.lock().unwrap().insert(ptr as usize, layout);
+// #[unsafe(no_mangle)]
+// unsafe extern "C" fn malloc(size: size_t) -> *mut c_void {
+//     // log::debug!("malloc called");
+//     let layout = Layout::from_size_align(size, 16).unwrap();
+//     let ptr = HACK_HEAP.lock().alloc(layout).unwrap().as_ptr() as *mut c_void;
+//     ALLOC_LAYOUT.lock().unwrap().insert(ptr as usize, layout);
 
-    ptr
-}
+//     ptr
+// }
 
-static FREE_SYMBOL: LazyLock<unsafe extern "C" fn(*mut c_void)> = LazyLock::new(|| unsafe {
-    let sym = libc::dlsym(libc::RTLD_NEXT, b"free\0".as_ptr() as *const i8);
-    std::mem::transmute(sym)
-});
-#[unsafe(no_mangle)]
-unsafe extern "C" fn free(ptr: *mut c_void) {
-    unsafe {
-        if ptr.is_null() {
-            return;
-        }
+// static REALLOC_SYMBOL: LazyLock<unsafe extern "C" fn(*mut c_void, size_t) -> *mut c_void> =
+//     LazyLock::new(|| unsafe {
+//         let sym = libc::dlsym(libc::RTLD_NEXT, b"realloc\0".as_ptr() as *const i8);
+//         std::mem::transmute(sym)
+//     });
 
-        log::debug!("free called");
+// #[unsafe(no_mangle)]
+// unsafe extern "C" fn realloc(ptr: *mut c_void, size: size_t) -> *mut c_void {
+//     unsafe {
+//         log::debug!("realloc called");
 
-        let layout_opt = ALLOC_LAYOUT.lock().unwrap().remove(&(ptr as usize));
+//         // 如果 ptr 是 null，realloc 等同于 malloc
+//         if ptr.is_null() {
+//             return malloc(size);
+//         }
 
-        if let Some(layout) = layout_opt {
-            HACK_HEAP
-                .lock()
-                .dealloc(NonNull::new(ptr as *mut u8).unwrap(), layout);
-        } else {
-            // 不是我们分配的内存，使用系统的 free
-            log::debug!("free: not our allocation, using system free");
-            (*FREE_SYMBOL)(ptr);
-        }
-    }
-}
+//         // 如果 size 是 0，realloc 等同于 free
+//         if size == 0 {
+//             free(ptr);
+//             return std::ptr::null_mut();
+//         }
 
-static REALLOC_SYMBOL: LazyLock<unsafe extern "C" fn(*mut c_void, size_t) -> *mut c_void> =
-    LazyLock::new(|| unsafe {
-        let sym = libc::dlsym(libc::RTLD_NEXT, b"realloc\0".as_ptr() as *const i8);
-        std::mem::transmute(sym)
-    });
+//         // 检查这个指针是否是我们分配的
+//         let old_layout_opt = ALLOC_LAYOUT.lock().unwrap().get(&(ptr as usize)).copied();
 
-#[unsafe(no_mangle)]
-unsafe extern "C" fn realloc(ptr: *mut c_void, size: size_t) -> *mut c_void {
-    unsafe {
-        log::debug!("realloc called");
+//         if let Some(old_layout) = old_layout_opt {
+//             // 是我们分配的内存
+//             let new_layout = Layout::from_size_align(size, 16).unwrap();
 
-        // 如果 ptr 是 null，realloc 等同于 malloc
-        if ptr.is_null() {
-            return malloc(size);
-        }
+//             // 分配新内存
+//             let new_ptr = HACK_HEAP.lock().alloc(new_layout).unwrap().as_ptr() as *mut c_void;
 
-        // 如果 size 是 0，realloc 等同于 free
-        if size == 0 {
-            free(ptr);
-            return std::ptr::null_mut();
-        }
+//             // 复制旧数据
+//             let copy_size = std::cmp::min(old_layout.size(), size);
+//             std::ptr::copy_nonoverlapping(ptr as *const u8, new_ptr as *mut u8, copy_size);
 
-        // 检查这个指针是否是我们分配的
-        let old_layout_opt = ALLOC_LAYOUT.lock().unwrap().get(&(ptr as usize)).copied();
+//             // 释放旧内存
+//             ALLOC_LAYOUT.lock().unwrap().remove(&(ptr as usize));
+//             HACK_HEAP
+//                 .lock()
+//                 .dealloc(NonNull::new(ptr as *mut u8).unwrap(), old_layout);
 
-        if let Some(old_layout) = old_layout_opt {
-            // 是我们分配的内存
-            let new_layout = Layout::from_size_align(size, 16).unwrap();
+//             // 记录新内存
+//             ALLOC_LAYOUT
+//                 .lock()
+//                 .unwrap()
+//                 .insert(new_ptr as usize, new_layout);
 
-            // 分配新内存
-            let new_ptr = HACK_HEAP.lock().alloc(new_layout).unwrap().as_ptr() as *mut c_void;
+//             new_ptr
+//         } else {
+//             // 不是我们分配的内存，使用系统的 realloc
+//             log::debug!("realloc: not our allocation, using system realloc");
+//             (*REALLOC_SYMBOL)(ptr, size)
+//         }
+//     }
+// }
 
-            // 复制旧数据
-            let copy_size = std::cmp::min(old_layout.size(), size);
-            std::ptr::copy_nonoverlapping(ptr as *const u8, new_ptr as *mut u8, copy_size);
+// #[unsafe(no_mangle)]
+// unsafe extern "C" fn calloc(nmemb: size_t, size: size_t) -> *mut c_void {
+//     unsafe {
+//         if nmemb == 0 || size == 0 {
+//             return std::ptr::null_mut();
+//         }
 
-            // 释放旧内存
-            ALLOC_LAYOUT.lock().unwrap().remove(&(ptr as usize));
-            HACK_HEAP
-                .lock()
-                .dealloc(NonNull::new(ptr as *mut u8).unwrap(), old_layout);
+//         let total = nmemb * size;
+//         let ptr = malloc(total);
+//         if !ptr.is_null() {
+//             std::ptr::write_bytes(ptr as *mut u8, 0, total);
+//         }
+//         ptr
+//     }
+// }
 
-            // 记录新内存
-            ALLOC_LAYOUT
-                .lock()
-                .unwrap()
-                .insert(new_ptr as usize, new_layout);
+// #[unsafe(no_mangle)]
+// unsafe extern "C" fn aligned_alloc(alignment: size_t, size: size_t) -> *mut c_void {
+//     unsafe {
+//         let layout = Layout::from_size_align(size, alignment).unwrap();
+//         let ptr = HACK_HEAP.lock().alloc(layout).unwrap().as_ptr() as *mut c_void;
+//         ALLOC_LAYOUT.lock().unwrap().insert(ptr as usize, layout);
 
-            new_ptr
-        } else {
-            // 不是我们分配的内存，使用系统的 realloc
-            log::debug!("realloc: not our allocation, using system realloc");
-            (*REALLOC_SYMBOL)(ptr, size)
-        }
-    }
-}
+//         log::debug!(
+//             "[hack_libc] aligned_alloc: size={}, align={}, ptr={:p}",
+//             size,
+//             alignment,
+//             ptr
+//         );
+
+//         ptr
+//     }
+// }
+
+// #[unsafe(no_mangle)]
+// unsafe extern "C" fn memalign(alignment: size_t, size: size_t) -> *mut c_void {
+//     unsafe {
+//         // memalign 和 aligned_alloc 功能相同
+//         aligned_alloc(alignment, size)
+//     }
+// }
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn posix_memalign(
@@ -219,45 +234,30 @@ unsafe extern "C" fn posix_memalign(
     }
 }
 
+static FREE_SYMBOL: LazyLock<unsafe extern "C" fn(*mut c_void)> = LazyLock::new(|| unsafe {
+    let sym = libc::dlsym(libc::RTLD_NEXT, b"free\0".as_ptr() as *const i8);
+    std::mem::transmute(sym)
+});
 #[unsafe(no_mangle)]
-unsafe extern "C" fn calloc(nmemb: size_t, size: size_t) -> *mut c_void {
+unsafe extern "C" fn free(ptr: *mut c_void) {
     unsafe {
-        if nmemb == 0 || size == 0 {
-            return std::ptr::null_mut();
+        if ptr.is_null() {
+            return;
         }
 
-        let total = nmemb * size;
-        let ptr = malloc(total);
-        if !ptr.is_null() {
-            std::ptr::write_bytes(ptr as *mut u8, 0, total);
+        log::debug!("free called");
+
+        let layout_opt = ALLOC_LAYOUT.lock().unwrap().remove(&(ptr as usize));
+
+        if let Some(layout) = layout_opt {
+            HACK_HEAP
+                .lock()
+                .dealloc(NonNull::new(ptr as *mut u8).unwrap(), layout);
+        } else {
+            // 不是我们分配的内存，使用系统的 free
+            log::debug!("free: not our allocation, using system free");
+            (*FREE_SYMBOL)(ptr);
         }
-        ptr
-    }
-}
-
-#[unsafe(no_mangle)]
-unsafe extern "C" fn aligned_alloc(alignment: size_t, size: size_t) -> *mut c_void {
-    unsafe {
-        let layout = Layout::from_size_align(size, alignment).unwrap();
-        let ptr = HACK_HEAP.lock().alloc(layout).unwrap().as_ptr() as *mut c_void;
-        ALLOC_LAYOUT.lock().unwrap().insert(ptr as usize, layout);
-
-        log::debug!(
-            "[hack_libc] aligned_alloc: size={}, align={}, ptr={:p}",
-            size,
-            alignment,
-            ptr
-        );
-
-        ptr
-    }
-}
-
-#[unsafe(no_mangle)]
-unsafe extern "C" fn memalign(alignment: size_t, size: size_t) -> *mut c_void {
-    unsafe {
-        // memalign 和 aligned_alloc 功能相同
-        aligned_alloc(alignment, size)
     }
 }
 
