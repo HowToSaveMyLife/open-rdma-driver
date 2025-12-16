@@ -104,15 +104,124 @@ pub(crate) struct SimpleTcpClient {
 }
 
 impl SimpleTcpClient {
-    // 会阻塞，直到连接上
+    /// Connect to TCP server with retry logic for simulator startup
+    ///
+    /// In simulation mode, the RTL simulator may take time to start.
+    /// This function implements exponential backoff retry to wait for
+    /// the simulator to become available.
+    ///
+    /// Configuration via environment variables:
+    /// - `SIM_TCP_RETRY_TIMEOUT_SECS`: Total timeout in seconds (default: 300 = 5 minutes)
+    /// - `SIM_TCP_RETRY_INITIAL_MS`: Initial retry delay in milliseconds (default: 100)
+    /// - `SIM_TCP_RETRY_MAX_MS`: Maximum retry delay in milliseconds (default: 2000)
+    /// - `SIM_TCP_RETRY_LOG_INTERVAL_SECS`: Log interval in seconds (default: 5)
     pub(crate) fn new(addr: SocketAddr) -> Result<Self, std::io::Error> {
-        let stream = TcpStream::connect(addr)?;
+        use std::time::Instant;
+
+        log::info!(
+            "new tcp client with pid {}, addr is: {}",
+            std::process::id(),
+            addr
+        );
+        // Load retry configuration: env vars override hardcoded defaults
+        let timeout_secs = std::env::var("SIM_TCP_RETRY_TIMEOUT_SECS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(300); // Default: 5 minutes
+
+        let initial_delay_ms = std::env::var("SIM_TCP_RETRY_INITIAL_MS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(100); // Default: 100ms
+
+        let max_delay_ms = std::env::var("SIM_TCP_RETRY_MAX_MS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(2000); // Default: 2000ms (2 seconds)
+
+        let log_interval_secs = std::env::var("SIM_TCP_RETRY_LOG_INTERVAL_SECS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(5); // Default: 5 seconds
+
+        let total_timeout = Duration::from_secs(timeout_secs);
+        let log_interval = Duration::from_secs(log_interval_secs);
+
+        let start_time = Instant::now();
+        let mut last_log_time = start_time;
+        let mut attempt = 0;
+        let mut delay = Duration::from_millis(initial_delay_ms);
+
+        // Retry loop with exponential backoff
+        let stream = loop {
+            attempt += 1;
+
+            match TcpStream::connect(addr) {
+                Ok(stream) => {
+                    log::info!(
+                        "Connected to simulator at {} after {} attempts ({:.2}s)",
+                        addr,
+                        attempt,
+                        start_time.elapsed().as_secs_f64()
+                    );
+                    break stream;
+                }
+                Err(e) => {
+                    let elapsed = start_time.elapsed();
+
+                    // Check if total timeout exceeded
+                    if elapsed >= total_timeout {
+                        log::error!(
+                            "Failed to connect to simulator at {} after {:.2}s: timeout",
+                            addr,
+                            elapsed.as_secs_f64()
+                        );
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::TimedOut,
+                            format!("Timeout connecting to simulator at {}: {}", addr, e),
+                        ));
+                    }
+
+                    // Log on first attempt and periodically every N seconds
+                    if attempt == 1 {
+                        log::info!(
+                            "Waiting for simulator at {} (will retry for {:.0}s)...",
+                            addr,
+                            total_timeout.as_secs_f64()
+                        );
+                        last_log_time = start_time;
+                    } else if elapsed.saturating_sub(last_log_time.elapsed()) >= log_interval {
+                        log::info!(
+                            "Still waiting for simulator at {} ({:.1}s elapsed, {} attempts)...",
+                            addr,
+                            elapsed.as_secs_f64(),
+                            attempt
+                        );
+                        last_log_time = Instant::now();
+                    }
+
+                    // Exponential backoff with cap
+                    let remaining = total_timeout.saturating_sub(elapsed);
+                    let sleep_duration = delay.min(remaining);
+
+                    if sleep_duration.is_zero() {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::TimedOut,
+                            format!("Timeout connecting to simulator at {}", addr),
+                        ));
+                    }
+
+                    thread::sleep(sleep_duration);
+                    delay = (delay * 2).min(Duration::from_millis(max_delay_ms));
+                }
+            }
+        };
+
         stream.set_nodelay(true)?;
         // 用于超时心跳包 TODO 可能需要调整参数
         stream.set_read_timeout(Some(READ_TIMEOUT))?;
 
         let stream_for_reader = stream.try_clone()?;
-
         let reader = BufReader::new(stream_for_reader);
 
         Ok(Self { stream, reader })
