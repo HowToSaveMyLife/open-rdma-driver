@@ -1,12 +1,15 @@
 use std::net::Ipv4Addr;
 
 use crate::verbs::dev::PciHwDevice;
+use parking_lot::Mutex;
+use parking_lot::{lock_api::MutexGuard, RawMutex};
 
 use super::{
     ctx::{HwDeviceCtx, VerbsOps},
     dev::EmulatedHwDevice,
     mock::MockDeviceCtx,
 };
+use std::sync::{LazyLock, OnceLock};
 
 /// RDMA context operations for Blue-RDMA driver.
 ///
@@ -102,18 +105,77 @@ struct BlueRdmaDevice {
     abi_version: core::ffi::c_int,
 }
 
-pub(super) fn get_device(context: *mut ibverbs_sys::ibv_context) -> &'static mut dyn VerbsOps {
+//TODO need to deal with error correct
+// add lazy init to deal nccl's action: nccl with open all devices at first
+pub(super) fn get_device(
+    context: *mut ibverbs_sys::ibv_context,
+) -> MutexGuard<'static, RawMutex, impl VerbsOps> {
     let dev_ptr = unsafe { *context }.device.cast::<BlueRdmaDevice>();
     let driver_ptr = unsafe { (*dev_ptr).driver };
+    log::info!(
+        "receive ptr is:{:?},at pid: {}",
+        driver_ptr,
+        std::process::id()
+    );
+
+    // Extract device name from ibv_context
+    let ibv_dev_ptr = unsafe { (*context).device };
+    let device_name = unsafe {
+        let name_ptr = (*ibv_dev_ptr).dev_name.as_ptr();
+        std::ffi::CStr::from_ptr(name_ptr)
+            .to_string_lossy()
+            .into_owned()
+    };
+    log::info!("device name is:{}", device_name);
 
     #[cfg(feature = "hw")]
-    let device = unsafe { driver_ptr.cast::<HwDeviceCtx<PciHwDevice>>().as_mut() };
+    {
+        let device: &'static OnceLock<Mutex<HwDeviceCtx<PciHwDevice>>> = unsafe {
+            driver_ptr
+                .cast::<OnceLock<Mutex<HwDeviceCtx<PciHwDevice>>>>()
+                .as_ref()
+                .expect("Invalid driver pointer")
+        };
+        device
+            .get_or_init(|| {
+                let ctx = super::core::BlueRdmaCore::new_hw(&device_name)
+                    .unwrap_or_else(|err| panic!("Failed to initialize hw context: {err}"));
+                Mutex::new(ctx)
+            })
+            .lock()
+    }
 
     #[cfg(feature = "sim")]
-    let device = unsafe { driver_ptr.cast::<HwDeviceCtx<EmulatedHwDevice>>().as_mut() };
+    {
+        let device: &'static OnceLock<Mutex<HwDeviceCtx<EmulatedHwDevice>>> = unsafe {
+            driver_ptr
+                .cast::<OnceLock<Mutex<HwDeviceCtx<EmulatedHwDevice>>>>()
+                .as_ref()
+                .expect("Invalid driver pointer")
+        };
+        device
+            .get_or_init(|| {
+                let ctx = super::core::BlueRdmaCore::new_emulated(&device_name)
+                    .unwrap_or_else(|err| panic!("Failed to initialize emulated context: {err}"));
+                Mutex::new(ctx)
+            })
+            .lock()
+    }
 
     #[cfg(feature = "mock")]
-    let device = unsafe { driver_ptr.cast::<MockDeviceCtx>().as_mut() };
-
-    device.unwrap_or_else(|| unreachable!("null device pointer"))
+    {
+        let device: &'static OnceLock<Mutex<MockDeviceCtx>> = unsafe {
+            driver_ptr
+                .cast::<OnceLock<Mutex<MockDeviceCtx>>>()
+                .as_ref()
+                .expect("Invalid driver pointer")
+        };
+        device
+            .get_or_init(|| {
+                let ctx = super::core::BlueRdmaCore::new_mock(&device_name)
+                    .unwrap_or_else(|err| panic!("Failed to initialize mock context: {err}"));
+                Mutex::new(ctx)
+            })
+            .lock()
+    }
 }

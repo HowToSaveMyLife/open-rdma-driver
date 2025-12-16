@@ -1,4 +1,5 @@
 use std::ptr::NonNull;
+use std::sync::{LazyLock, OnceLock};
 use std::{io, net::Ipv4Addr, ptr};
 
 use ipnetwork::{IpNetwork, Ipv4Network};
@@ -54,7 +55,7 @@ impl BlueRdmaCore {
     }
 
     #[allow(clippy::unwrap_used, clippy::unwrap_in_result)]
-    fn new_hw(sysfs_name: &str) -> Result<HwDeviceCtx<PciHwDevice>> {
+    pub(super) fn new_hw(sysfs_name: &str) -> Result<HwDeviceCtx<PciHwDevice>> {
         Self::check_logger_inited();
         debug!("before load default");
         let config = ConfigLoader::load_default()?;
@@ -73,7 +74,7 @@ impl BlueRdmaCore {
     }
 
     #[allow(clippy::unwrap_used, clippy::unwrap_in_result)]
-    fn new_emulated(sysfs_name: &str) -> Result<HwDeviceCtx<EmulatedHwDevice>> {
+    pub(super) fn new_emulated(sysfs_name: &str) -> Result<HwDeviceCtx<EmulatedHwDevice>> {
         let device = match sysfs_name {
             "uverbs0" => EmulatedHwDevice::new("127.0.0.1:7701".into(), "127.0.0.1:7003".into()),
             "uverbs1" => EmulatedHwDevice::new("127.0.0.1:7702".into(), "127.0.0.1:7004".into()),
@@ -98,7 +99,7 @@ impl BlueRdmaCore {
     }
 
     #[allow(clippy::unnecessary_wraps)]
-    fn new_mock(sysfs_name: &str) -> Result<MockDeviceCtx> {
+    pub(super) fn new_mock(sysfs_name: &str) -> Result<MockDeviceCtx> {
         Ok(MockDeviceCtx::default())
     }
 }
@@ -117,20 +118,30 @@ unsafe impl RdmaCtxOps for BlueRdmaCore {
                 .to_string_lossy()
                 .into_owned()
         };
+        debug!("before create once_lock ctx for device: {}", name);
 
-        debug!("before create hardware ctx");
-        let ctx = BlueRdmaCore::new_hw(&name);
+        #[cfg(feature = "hw")]
+        {
+            let once_ctx: OnceLock<parking_lot::Mutex<HwDeviceCtx<PciHwDevice>>> = OnceLock::new();
+            let ptr = Box::into_raw(Box::new(once_ctx)).cast();
+            log::info!("create hw ptr is:{:?},at pid: {}", ptr, std::process::id());
+            ptr
+        }
+
         #[cfg(feature = "sim")]
-        let ctx = BlueRdmaCore::new_emulated(&name);
-        #[cfg(feature = "mock")]
-        let ctx = BlueRdmaCore::new_mock(&name);
+        {
+            let once_ctx: OnceLock<parking_lot::Mutex<HwDeviceCtx<EmulatedHwDevice>>> = OnceLock::new();
+            let ptr = Box::into_raw(Box::new(once_ctx)).cast();
+            log::info!("create sim ptr is:{:?},at pid: {}", ptr, std::process::id());
+            ptr
+        }
 
-        match ctx {
-            Ok(x) => Box::into_raw(Box::new(x)).cast(),
-            Err(err) => {
-                error!("Failed to initialize hw context: {err}");
-                ptr::null_mut()
-            }
+        #[cfg(feature = "mock")]
+        {
+            let once_ctx: OnceLock<parking_lot::Mutex<MockDeviceCtx>> = OnceLock::new();
+            let ptr = Box::into_raw(Box::new(once_ctx)).cast();
+            log::info!("create mock ptr is:{:?},at pid: {}", ptr, std::process::id());
+            ptr
         }
     }
 
@@ -149,7 +160,7 @@ unsafe impl RdmaCtxOps for BlueRdmaCore {
 
     #[inline]
     fn alloc_pd(blue_context: *mut ibverbs_sys::ibv_context) -> *mut ibverbs_sys::ibv_pd {
-        let bluerdma = get_device(blue_context);
+        let mut bluerdma = get_device(blue_context);
 
         match bluerdma.alloc_pd() {
             Ok(handle) => Box::into_raw(Box::new(ibverbs_sys::ibv_pd {
@@ -166,7 +177,7 @@ unsafe impl RdmaCtxOps for BlueRdmaCore {
     #[inline]
     fn dealloc_pd(pd: *mut ibverbs_sys::ibv_pd) -> ::std::os::raw::c_int {
         let pd = deref_or_ret!(pd, libc::EINVAL);
-        let bluerdma = get_device(pd.context);
+        let mut bluerdma = get_device(pd.context);
 
         match bluerdma.dealloc_pd(pd.handle) {
             Ok(()) => 0,
@@ -230,7 +241,7 @@ unsafe impl RdmaCtxOps for BlueRdmaCore {
         channel: *mut ibverbs_sys::ibv_comp_channel,
         comp_vector: core::ffi::c_int,
     ) -> *mut ibverbs_sys::ibv_cq {
-        let bluerdma = get_device(blue_context);
+        let mut bluerdma = get_device(blue_context);
         match bluerdma.create_cq() {
             Ok(handle) => {
                 let cq = ibverbs_sys::ibv_cq {
@@ -256,7 +267,7 @@ unsafe impl RdmaCtxOps for BlueRdmaCore {
     #[inline]
     fn destroy_cq(cq: *mut ibverbs_sys::ibv_cq) -> ::std::os::raw::c_int {
         let cq = deref_or_ret!(cq, libc::EINVAL);
-        let bluerdma = get_device(cq.context);
+        let mut bluerdma = get_device(cq.context);
 
         match bluerdma.destroy_cq(cq.handle) {
             Ok(()) => 0,
@@ -273,7 +284,7 @@ unsafe impl RdmaCtxOps for BlueRdmaCore {
         init_attr: *mut ibverbs_sys::ibv_qp_init_attr,
     ) -> *mut ibverbs_sys::ibv_qp {
         let context = deref_or_ret!(pd, ptr::null_mut()).context;
-        let bluerdma = get_device(context);
+        let mut bluerdma = get_device(context);
         let init_attr = deref_or_ret!(init_attr, ptr::null_mut());
         match bluerdma.create_qp(IbvQpInitAttr::new(init_attr)) {
             Ok(qpn) => Box::into_raw(Box::new(ibverbs_sys::ibv_qp {
@@ -302,7 +313,7 @@ unsafe impl RdmaCtxOps for BlueRdmaCore {
     fn destroy_qp(qp: *mut ibverbs_sys::ibv_qp) -> ::std::os::raw::c_int {
         let qp = deref_or_ret!(qp, libc::EINVAL);
         let context = qp.context;
-        let bluerdma = get_device(context);
+        let mut bluerdma = get_device(context);
         let qpn = qp.qp_num;
         match bluerdma.destroy_qp(qpn) {
             Ok(()) => 0,
@@ -323,7 +334,7 @@ unsafe impl RdmaCtxOps for BlueRdmaCore {
         let qp = deref_or_ret!(qp, libc::EINVAL);
         let attr = deref_or_ret!(attr, libc::EINVAL);
         let context = qp.context;
-        let bluerdma = get_device(context);
+        let mut bluerdma = get_device(context);
         let mask = attr_mask as u32;
         match bluerdma.update_qp(qp.qp_num, IbvQpAttr::new(attr, attr_mask as u32)) {
             Ok(()) => 0,
@@ -343,7 +354,7 @@ unsafe impl RdmaCtxOps for BlueRdmaCore {
     ) -> ::std::os::raw::c_int {
         let qp = deref_or_ret!(qp, libc::EINVAL);
         let context = qp.context;
-        let bluerdma = unsafe { get_device(context) };
+        let mut bluerdma = unsafe { get_device(context) };
 
         0
     }
@@ -360,7 +371,7 @@ unsafe impl RdmaCtxOps for BlueRdmaCore {
         let pd_deref = deref_or_ret!(pd, ptr::null_mut());
         let context = pd_deref.context;
         let pd_handle = pd_deref.handle;
-        let bluerdma = get_device(pd_deref.context);
+        let mut bluerdma = get_device(pd_deref.context);
         match bluerdma.reg_mr(addr as u64, length, pd_handle, access as u8) {
             Ok(mr_key) => {
                 let ibv_mr = Box::new(ibverbs_sys::ibv_mr {
@@ -385,7 +396,7 @@ unsafe impl RdmaCtxOps for BlueRdmaCore {
     fn dereg_mr(mr: *mut ibverbs_sys::ibv_mr) -> ::std::os::raw::c_int {
         let mr = deref_or_ret!(mr, libc::EINVAL);
         let pd = deref_or_ret!(mr.pd, libc::EINVAL);
-        let bluerdma = get_device(mr.context);
+        let mut bluerdma = get_device(mr.context);
         match bluerdma.dereg_mr(mr.handle) {
             Ok(()) => 0,
             Err(err) => {
@@ -402,11 +413,11 @@ unsafe impl RdmaCtxOps for BlueRdmaCore {
         bad_wr: *mut *mut ibverbs_sys::ibv_send_wr,
     ) -> ::std::os::raw::c_int {
         let qp = deref_or_ret!(qp, libc::EINVAL);
-        let wr_ptr = wr;  // Save original pointer for error reporting
+        let wr_ptr = wr; // Save original pointer for error reporting
         let wr = deref_or_ret!(wr, libc::EINVAL);
         let context = qp.context;
         let qp_num = qp.qp_num;
-        let bluerdma = get_device(context);
+        let mut bluerdma = get_device(context);
         let send_wr = match SendWr::new(wr) {
             Ok(wr) => wr,
             Err(err) => {
@@ -431,11 +442,11 @@ unsafe impl RdmaCtxOps for BlueRdmaCore {
         bad_wr: *mut *mut ibverbs_sys::ibv_recv_wr,
     ) -> ::std::os::raw::c_int {
         let qp = deref_or_ret!(qp, libc::EINVAL);
-        let wr_ptr = wr;  // Save original pointer for error reporting
+        let wr_ptr = wr; // Save original pointer for error reporting
         let wr = deref_or_ret!(wr, libc::EINVAL);
         let context = qp.context;
         let qp_num = qp.qp_num;
-        let bluerdma = unsafe { get_device(context) };
+        let mut bluerdma = unsafe { get_device(context) };
         let Some(recv_wr) = RecvWr::new(wr) else {
             error!("Invalid receive WR: only 0 or 1 SGE is supported (num_sge must be 0 or 1)");
             unsafe { *bad_wr = wr_ptr };
@@ -462,7 +473,7 @@ unsafe impl RdmaCtxOps for BlueRdmaCore {
         wc: *mut ibverbs_sys::ibv_wc,
     ) -> i32 {
         let cq = deref_or_ret!(cq, 0);
-        let bluerdma = get_device(cq.context);
+        let mut bluerdma = get_device(cq.context);
         let completions = bluerdma.poll_cq(cq.handle, num_entries as usize);
         let num = completions.len() as i32;
         for (i, c) in completions.into_iter().enumerate() {
