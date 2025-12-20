@@ -177,6 +177,7 @@ nompi_hack_rank0: $(NOMPI_TARGET)
 	export NCCL_P2P_DISABLE=1 && \
 	export NCCL_SHM_DISABLE=1 && \
 	export LD_PRELOAD=$(HACK_LD_LIB) && \
+	export RUST_LOG=INFO && \
 	$(NOMPI_TARGET) 0
 
 # Run normal_test_nompi as rank 1 (client)
@@ -195,6 +196,7 @@ nompi_hack_rank1: $(NOMPI_TARGET)
 	export NCCL_P2P_DISABLE=1 && \
 	export NCCL_SHM_DISABLE=1 && \
 	export LD_PRELOAD=$(HACK_LD_LIB) && \
+	export RUST_LOG=INFO && \
 	$(NOMPI_TARGET) 1
 
 
