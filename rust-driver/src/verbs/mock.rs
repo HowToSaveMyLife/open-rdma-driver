@@ -26,8 +26,8 @@ use std::{
 use crate::{
     csr::DeviceAdaptor,
     error::{RdmaError, Result},
-    types::{PhysAddr, VirtAddr},
     rdma_utils::{
+        pagemaps::check_addr_is_anon_hugepage,
         pd::PdTable,
         qp::{QpManager, QpTable},
         types::{
@@ -35,11 +35,13 @@ use crate::{
             RecvWr, SendWr,
         },
     },
+    types::{PhysAddr, VirtAddr},
 };
 
 use bincode::{Decode, Encode};
 use bitvec::store::BitStore;
 use log::{debug, error, info, warn};
+use pagemap::MapsEntry;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
@@ -172,10 +174,15 @@ impl VerbsOps for MockDeviceCtx {
         pd_handle: u32,
         access: u8,
     ) -> crate::error::Result<u32> {
+        #[cfg(feature = "page_size_2m")]
+        assert!(check_addr_is_anon_hugepage(VirtAddr::new(addr), length));
         let addr_resolver = PhysAddrResolverLinuxX86;
-        let pa = addr_resolver.virt_to_phys(VirtAddr::new(addr)).map_err(|e| {
-            RdmaError::MemoryError(format!("Failed to resolve physical address: {e}",))
-        })?;
+        let pa = addr_resolver
+            .virt_to_phys(VirtAddr::new(addr))
+            .map_err(|e| {
+                log::warn!("Failed to resolve physical address: {e}");
+                RdmaError::MemoryError(format!("Failed to resolve physical address: {e}",))
+            })?;
 
         info!("mock reg mr, virt addr: {addr:x}, length: {length}, access: {access}, phys_addr: {pa:?}");
 
@@ -293,7 +300,9 @@ impl VerbsOps for MockDeviceCtx {
                         conn_c.send(QpTransportMessage::WriteResp(resp));
                     } else {
                         // No RecvWr available, queue for later processing
-                        log::warn!("No RecvWr available for WRITE_WITH_IMM on QPN {qpn}, queuing message");
+                        log::warn!(
+                            "No RecvWr available for WRITE_WITH_IMM on QPN {qpn}, queuing message"
+                        );
                         pending_write_with_imm.push_back(req);
                     }
                 }
@@ -549,13 +558,15 @@ impl VerbsOps for MockDeviceCtx {
         let result = self.qp_ctx_table.map_qp_mut(qpn, |ctx| {
             if let Some(tx) = ctx.local_task_tx.as_ref() {
                 tx.send(LocalTask::PostRecv(PostRecvReq { wr }))
-                    .map_err(|e| RdmaError::QpError(
-                        format!("Failed to post receive request for QP {qpn}: {e}")
-                    ))
+                    .map_err(|e| {
+                        RdmaError::QpError(format!(
+                            "Failed to post receive request for QP {qpn}: {e}"
+                        ))
+                    })
             } else {
-                Err(RdmaError::QpError(
-                    format!("Task channel not initialized for QP {qpn}")
-                ))
+                Err(RdmaError::QpError(format!(
+                    "Task channel not initialized for QP {qpn}"
+                )))
             }
         });
 
@@ -1040,7 +1051,11 @@ mod tests {
             0,
             WorkReqOpCode::RdmaWriteWithImm,
         );
-        let wr = SendWrRdma::new_from_base(wr_base, RemoteAddr::new(buf1.as_ptr() as u64), buf1.len() as u32);
+        let wr = SendWrRdma::new_from_base(
+            wr_base,
+            RemoteAddr::new(buf1.as_ptr() as u64),
+            buf1.len() as u32,
+        );
         dev0.dev.post_send(dev0.qpn, wr.into());
         thread::sleep(Duration::from_millis(10));
         assert!(buf1.iter().all(|x| *x == 1));
@@ -1082,7 +1097,11 @@ mod tests {
             WorkReqOpCode::RdmaWriteWithImm,
         );
         for _ in 0..NUM_WRITES {
-            let wr = SendWrRdma::new_from_base(wr_base, RemoteAddr::new(buf1.as_ptr() as u64), buf1.len() as u32);
+            let wr = SendWrRdma::new_from_base(
+                wr_base,
+                RemoteAddr::new(buf1.as_ptr() as u64),
+                buf1.len() as u32,
+            );
             dev0.dev.post_send(dev0.qpn, wr.into());
         }
         thread::sleep(Duration::from_millis(10));
@@ -1113,7 +1132,11 @@ mod tests {
             0,
             WorkReqOpCode::RdmaRead,
         );
-        let wr = SendWrRdma::new_from_base(wr_base, RemoteAddr::new(buf1.as_ptr() as u64), buf1.len() as u32);
+        let wr = SendWrRdma::new_from_base(
+            wr_base,
+            RemoteAddr::new(buf1.as_ptr() as u64),
+            buf1.len() as u32,
+        );
         dev0.dev.post_send(dev0.qpn, wr.into());
         thread::sleep(Duration::from_millis(10));
         assert!(buf0.iter().all(|x| *x == 1));
@@ -1137,7 +1160,11 @@ mod tests {
             0,
             WorkReqOpCode::RdmaRead,
         );
-        let wr = SendWrRdma::new_from_base(wr_base, RemoteAddr::new(buf1.as_ptr() as u64), buf1.len() as u32);
+        let wr = SendWrRdma::new_from_base(
+            wr_base,
+            RemoteAddr::new(buf1.as_ptr() as u64),
+            buf1.len() as u32,
+        );
         dev0.dev.post_send(dev0.qpn, wr.into());
         thread::sleep(Duration::from_millis(10));
         assert!(buf0.iter().all(|x| *x == 1));

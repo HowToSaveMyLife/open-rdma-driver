@@ -1,6 +1,7 @@
 pub(crate) mod fragmenter;
 pub(crate) mod msn;
 pub(crate) mod mtt;
+pub(crate) mod pagemaps;
 pub(crate) mod pd;
 pub(crate) mod psn;
 pub(crate) mod psn_tracker;

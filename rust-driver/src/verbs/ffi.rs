@@ -112,11 +112,11 @@ pub(super) fn get_device(
 ) -> MutexGuard<'static, RawMutex, impl VerbsOps> {
     let dev_ptr = unsafe { *context }.device.cast::<BlueRdmaDevice>();
     let driver_ptr = unsafe { (*dev_ptr).driver };
-    log::info!(
-        "receive ptr is:{:?},at pid: {}",
-        driver_ptr,
-        std::process::id()
-    );
+    // log::debug!(
+    //     "receive ptr is:{:?},at pid: {}",
+    //     driver_ptr,
+    //     std::process::id()
+    // );
 
     // Extract device name from ibv_context
     let ibv_dev_ptr = unsafe { (*context).device };
@@ -126,7 +126,7 @@ pub(super) fn get_device(
             .to_string_lossy()
             .into_owned()
     };
-    log::info!("device name is:{}", device_name);
+    // log::debug!("device name is:{}", device_name);
 
     #[cfg(feature = "hw")]
     {

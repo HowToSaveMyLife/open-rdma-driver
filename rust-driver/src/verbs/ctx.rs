@@ -7,8 +7,8 @@ use std::{
 };
 
 use crossbeam_deque::Worker;
-use parking_lot::Mutex;
 use log::{debug, info};
+use parking_lot::Mutex;
 
 use crate::{
     cmd::{CommandConfigurator, MttUpdate, PgtUpdate, RecvBufferMeta, UpdateQp},
@@ -19,12 +19,18 @@ use crate::{
         get_num_page, page::PageAllocator, pin_pages, virt_to_phy::AddressResolver, DmaBuf,
         DmaBufAllocator, MemoryPinner, PageWithPhysAddr, UmemHandler, PAGE_SIZE,
     },
-    types::{PhysAddr, RemoteAddr, VirtAddr},
-    net::{config::NetworkConfig, reader::NetConfigReader, recv_chan::{
-        post_recv_channel, PostRecvTx, PostRecvTxTable, RecvWorker, RecvWrQueueTable, TcpChannel,
-    }, simple_nic::SimpleNicController},
+    net::{
+        config::NetworkConfig,
+        reader::NetConfigReader,
+        recv_chan::{
+            post_recv_channel, PostRecvTx, PostRecvTxTable, RecvWorker, RecvWrQueueTable,
+            TcpChannel,
+        },
+        simple_nic::SimpleNicController,
+    },
     rdma_utils::{
         mtt::{Mtt, PgtEntry},
+        pagemaps::check_addr_is_anon_hugepage,
         pd::PdTable,
         qp::{QpManager, QpTableShared},
         types::{
@@ -33,6 +39,7 @@ use crate::{
         },
     },
     ringbuf::DescRingBufAllocator,
+    types::{PhysAddr, RemoteAddr, VirtAddr},
     workers::{
         ack_responder::AckResponder,
         completion::{
@@ -124,7 +131,7 @@ where
         let rx_buffer_pa = rx_buffer.phys_addr;
         let qp_attr_table =
             QpTableShared::new_with(|| QpAttr::new_with_ip(net_config.ip.ip().to_bits()));
-        
+
         debug!("qp table initialized...");
         let qp_manager = QpManager::new();
         let cq_manager = CqManager::new();
@@ -155,7 +162,7 @@ where
             abort.clone(),
             Duration::from_nanos(4096u64 << config.ack().check_duration_exp),
         );
-        
+
         RdmaWriteWorker::new(
             qp_attr_table.clone(),
             handle,
@@ -271,6 +278,11 @@ where
         let umem_handler = self.device.new_umem_handler();
         let virt_addr = VirtAddr::new(addr);
         umem_handler.pin_pages(virt_addr, length)?;
+
+        //TODO maybe need to optimaze, it cost a lot
+        #[cfg(feature = "page_size_2m")]
+        assert!(check_addr_is_anon_hugepage(VirtAddr::new(addr), length));
+
         let num_pages = get_num_page(addr, length);
         debug!("generate page table entries: addr=0x{addr:x}, length=0x{length:x} --> num_pages={num_pages}");
         let (mr_key, pgt_entry) = self.mtt.register(num_pages)?;
@@ -282,10 +294,17 @@ where
             .collect::<Option<Vec<_>>>()
             .ok_or(RdmaError::MemoryError("Physical address not found".into()))?;
         let phys_addrs_for_debug = phys_addrs.clone();
-            // .into_iter();
+        // .into_iter();
         let buf = &mut self.mtt_buffer.buf;
         let base_index = pgt_entry.index;
-        let mtt_update = MttUpdate::new(VirtAddr::new(addr), length_u32, mr_key, pd_handle, access, base_index);
+        let mtt_update = MttUpdate::new(
+            VirtAddr::new(addr),
+            length_u32,
+            mr_key,
+            pd_handle,
+            access,
+            base_index,
+        );
         // TODO: makes updates atomic
         self.cmd_controller.update_mtt(mtt_update);
         let mut phys_addrs = phys_addrs.into_iter();
@@ -300,7 +319,10 @@ where
             debug!("new pgt update request: {pgt_update:?}");
             let mut va_start_for_debug = addr & (!(PAGE_SIZE as u64));
             for phy_addr in &phys_addrs_for_debug {
-                debug!("pgt map va -> pa: 0x{va_start_for_debug:x} -> 0x{:x}", phy_addr.as_u64());
+                debug!(
+                    "pgt map va -> pa: 0x{va_start_for_debug:x} -> 0x{:x}",
+                    phy_addr.as_u64()
+                );
                 va_start_for_debug += (PAGE_SIZE as u64);
             }
             self.cmd_controller.update_pgt(pgt_update);
@@ -396,7 +418,7 @@ where
                     .ok_or(RdmaError::NotFound(format!(
                         "Receive WR queue for QP {qpn} not found",
                     )))?;
-            
+
             debug!("before spawn RecvWorker");
             RecvWorker::new(rx, wr_queue).spawn();
         }
