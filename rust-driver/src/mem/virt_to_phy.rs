@@ -98,6 +98,7 @@ impl AddressResolver for PhysAddrResolverLinuxX86 {
                 return Ok(Some(PhysAddr::new(phys_addr)));
             }
 
+            log::warn!("translate fail! virt_addr = {virt_addr_raw:x}");
             Ok(None)
         };
 
@@ -119,7 +120,12 @@ impl AddressResolver for PhysAddrResolverLinuxX86 {
         start_addr: VirtAddr,
         num_pages: usize,
     ) -> io::Result<Vec<Option<PhysAddr>>> {
-        let start_addr_raw = start_addr.as_u64();
+        if (start_addr.as_u64() % PAGE_SIZE != 0) {
+            log::warn!("start_addr: {start_addr:x} is not page aligned");
+        }
+
+        //TODO 对齐也许可以做的更优雅
+        let start_addr_raw = start_addr.as_u64() / PAGE_SIZE * PAGE_SIZE;
         let base_page_size = get_base_page_size();
         let mut phy_addrs = vec![None; num_pages];
         let mut file = File::open("/proc/self/pagemap")?;
@@ -135,6 +141,7 @@ impl AddressResolver for PhysAddrResolverLinuxX86 {
             file.read_exact(&mut buf)?;
             let entry = u64::from_ne_bytes(buf);
             if (entry >> PAGE_PRESENT_BIT) & 1 != 0 {
+                log::warn!("entry is {entry:x}");
                 let phys_pfn = entry & PFN_MASK;
                 let phys_addr = phys_pfn * base_page_size + start_addr_raw % base_page_size;
                 *pa = Some(PhysAddr::new(phys_addr));
@@ -168,7 +175,10 @@ impl AddressResolver for PhysAddrResolverLinuxX86 {
                 addr += PAGE_SIZE;
             }
         }
-
+        log::info!(
+            "virt_addr = {start_addr_raw:x},phy_addrs = {:?}\n",
+            phy_addrs
+        );
         Ok(phy_addrs)
     }
 }
