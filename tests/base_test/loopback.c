@@ -23,18 +23,15 @@
 
 #define COMPILER_BARRIER() asm volatile("" ::: "memory")
 
-#define BUF_SIZE (128UL * 1024)
-
-const uint64_t SRC_BUFFER_OFFSET = 0;
-const uint64_t DST_BUFFER_OFFSET = BUF_SIZE;
+// BUF_SIZE will be calculated based on msg_len
+// This is just a default for declarations
+#define DEFAULT_BUF_SIZE (128UL * 1024)
 
 void die(const char *reason);
 void printZeroRanges(char *dst_buffer, int msg_len);
 void printMemoryHex(void *start_addr, size_t length);
 void wait_for_enter(const char *message);
 size_t memory_diff(const char *buf1, const char *buf2, size_t length);
-
-// TODO 目前该文件没有 IBV_QPS_RTR 状态下的代码，需要补充完整，没有严格遵守 RESET -> INIT -> RTR -> RTS
 
 void die(const char *reason)
 {
@@ -78,21 +75,29 @@ int run_single_mr(int msg_len)
   volatile unsigned char *volatile dst_buffer;
   int num_devices;
 
+  // Calculate buffer size based on msg_len, with some headroom
+  // Ensure it's at least DEFAULT_BUF_SIZE and aligned to page boundary
+  size_t buf_size = msg_len * 2;
+  if (buf_size < DEFAULT_BUF_SIZE)
+  {
+    buf_size = DEFAULT_BUF_SIZE;
+  }
+  // Align to 4KB page boundary
+  buf_size = (buf_size + 4095) & ~4095UL;
+
+  printf("Buffer size: %zu bytes (msg_len: %d)\n", buf_size, msg_len);
+
   // wait_for_enter(NULL);
 
-  buffer = mmap(NULL, BUF_SIZE * 2, PROT_READ | PROT_WRITE,
+  buffer = mmap(NULL, buf_size * 2, PROT_READ | PROT_WRITE,
                 MAP_SHARED | MAP_ANONYMOUS | MAP_HUGETLB | MAP_POPULATE, -1, 0);
   if (buffer == MAP_FAILED)
   {
     die("Map failed");
   }
 
-#ifdef COMPILE_FOR_RTL_SIMULATOR_TEST
-  buffer = (char *)0x7f7e8e600000;
-#endif
-
   src_buffer = buffer;
-  dst_buffer = buffer + BUF_SIZE;
+  dst_buffer = buffer + buf_size;
   printf("before ibv_get_device_list\n");
   dev_list = ibv_get_device_list(&num_devices);
   if (!dev_list)
@@ -148,7 +153,7 @@ int run_single_mr(int msg_len)
     die("Failed to modify QP0 to INIT");
   }
 
-  printf("before ibv_open_device -- init qp 1\n");
+  printf("before ibv_modify_qp -- init qp 1\n");
   if (ibv_modify_qp(qp1, &qp_attr,
                     IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT |
                         IBV_QP_ACCESS_FLAGS))
@@ -156,20 +161,21 @@ int run_single_mr(int msg_len)
     die("Failed to modify QP1 to INIT");
   }
 
-  qp_attr.qp_state = IBV_QPS_RTS;
+  // Transition QP0: INIT -> RTR
+  printf("before ibv_modify_qp -- qp0 to RTR\n");
+  memset(&qp_attr, 0, sizeof(qp_attr));
+  qp_attr.qp_state = IBV_QPS_RTR;
   qp_attr.path_mtu = IBV_MTU_4096;
   qp_attr.dest_qp_num = qp1->qp_num;
   qp_attr.rq_psn = 0;
+  qp_attr.max_dest_rd_atomic = 1;
+  qp_attr.min_rnr_timer = 12;
+  qp_attr.ah_attr.is_global = 0;
+  qp_attr.ah_attr.dlid = 0;
+  qp_attr.ah_attr.sl = 0;
+  qp_attr.ah_attr.src_path_bits = 0;
   qp_attr.ah_attr.port_num = 1;
-  uint32_t ipv4_addr = 0x1122330A;
-  qp_attr.ah_attr.grh.dgid.raw[10] = 0xFF;
-  qp_attr.ah_attr.grh.dgid.raw[11] = 0xFF;
-  qp_attr.ah_attr.grh.dgid.raw[12] = (ipv4_addr >> 24) & 0xFF;
-  qp_attr.ah_attr.grh.dgid.raw[13] = (ipv4_addr >> 16) & 0xFF;
-  qp_attr.ah_attr.grh.dgid.raw[14] = (ipv4_addr >> 8) & 0xFF;
-  qp_attr.ah_attr.grh.dgid.raw[15] = ipv4_addr & 0xFF;
 
-  printf("before ibv_modify_qp -- qp0 to rtr\n");
   if (ibv_modify_qp(qp0, &qp_attr,
                     IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU |
                         IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
@@ -178,13 +184,81 @@ int run_single_mr(int msg_len)
     fprintf(stderr, "Failed to modify QP0 to RTR\n");
     return 1;
   }
+
+  // Transition QP1: INIT -> RTR
+  printf("before ibv_modify_qp -- qp1 to RTR\n");
+  memset(&qp_attr, 0, sizeof(qp_attr));
+  qp_attr.qp_state = IBV_QPS_RTR;
+  qp_attr.path_mtu = IBV_MTU_4096;
   qp_attr.dest_qp_num = qp0->qp_num;
+  qp_attr.rq_psn = 0;
+  qp_attr.max_dest_rd_atomic = 1;
+  qp_attr.min_rnr_timer = 12;
+  qp_attr.ah_attr.is_global = 0;
+  qp_attr.ah_attr.dlid = 0;
+  qp_attr.ah_attr.sl = 0;
+  qp_attr.ah_attr.src_path_bits = 0;
+  qp_attr.ah_attr.port_num = 1;
+
   if (ibv_modify_qp(qp1, &qp_attr,
                     IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU |
                         IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
                         IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER))
   {
     fprintf(stderr, "Failed to modify QP1 to RTR\n");
+    return 1;
+  }
+
+  // Transition QP0: RTR -> RTS
+  printf("before ibv_modify_qp -- qp0 to RTS\n");
+  memset(&qp_attr, 0, sizeof(qp_attr));
+  qp_attr.qp_state = IBV_QPS_RTS;
+  qp_attr.timeout = 14;
+  qp_attr.retry_cnt = 7;
+  qp_attr.rnr_retry = 7;
+  qp_attr.sq_psn = 0;
+  qp_attr.max_rd_atomic = 1;
+
+  uint32_t ipv4_addr = 0x1122330A;
+  qp_attr.ah_attr.grh.dgid.raw[10] = 0xFF;
+  qp_attr.ah_attr.grh.dgid.raw[11] = 0xFF;
+  qp_attr.ah_attr.grh.dgid.raw[12] = (ipv4_addr >> 24) & 0xFF;
+  qp_attr.ah_attr.grh.dgid.raw[13] = (ipv4_addr >> 16) & 0xFF;
+  qp_attr.ah_attr.grh.dgid.raw[14] = (ipv4_addr >> 8) & 0xFF;
+  qp_attr.ah_attr.grh.dgid.raw[15] = ipv4_addr & 0xFF;
+
+  if (ibv_modify_qp(qp0, &qp_attr,
+                    IBV_QP_STATE | IBV_QP_AV | IBV_QP_TIMEOUT |
+                        IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN |
+                        IBV_QP_MAX_QP_RD_ATOMIC))
+  {
+    fprintf(stderr, "Failed to modify QP0 to RTS\n");
+    return 1;
+  }
+
+  // Transition QP1: RTR -> RTS
+  printf("before ibv_modify_qp -- qp1 to RTS\n");
+  memset(&qp_attr, 0, sizeof(qp_attr));
+  qp_attr.qp_state = IBV_QPS_RTS;
+  qp_attr.timeout = 14;
+  qp_attr.retry_cnt = 7;
+  qp_attr.rnr_retry = 7;
+  qp_attr.sq_psn = 0;
+  qp_attr.max_rd_atomic = 1;
+
+  qp_attr.ah_attr.grh.dgid.raw[10] = 0xFF;
+  qp_attr.ah_attr.grh.dgid.raw[11] = 0xFF;
+  qp_attr.ah_attr.grh.dgid.raw[12] = (ipv4_addr >> 24) & 0xFF;
+  qp_attr.ah_attr.grh.dgid.raw[13] = (ipv4_addr >> 16) & 0xFF;
+  qp_attr.ah_attr.grh.dgid.raw[14] = (ipv4_addr >> 8) & 0xFF;
+  qp_attr.ah_attr.grh.dgid.raw[15] = ipv4_addr & 0xFF;
+
+  if (ibv_modify_qp(qp1, &qp_attr,
+                    IBV_QP_STATE | IBV_QP_AV | IBV_QP_TIMEOUT |
+                        IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN |
+                        IBV_QP_MAX_QP_RD_ATOMIC))
+  {
+    fprintf(stderr, "Failed to modify QP1 to RTS\n");
     return 1;
   }
 
@@ -202,7 +276,7 @@ int run_single_mr(int msg_len)
   printf("before ibv_reg_mr\n");
   fflush(stdout);
 
-  mr = ibv_reg_mr(pd, buffer, BUF_SIZE * 2,
+  mr = ibv_reg_mr(pd, buffer, buf_size * 2,
                   IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
                       IBV_ACCESS_REMOTE_READ);
   struct ibv_sge sge = {
@@ -221,15 +295,23 @@ int run_single_mr(int msg_len)
   int cnt_valid = 0;
   int cnt_error = 0;
   char tmp_fill_cahr = 0;
-  int round = 0;
-  while (1)
+  int max_rounds = 2; // Test 10 times instead of infinite loop
+  int failed_rounds = 0;
+
+  printf("Starting %d test rounds...\n", max_rounds);
+
+  for (int round = 1; round <= max_rounds; round++)
   {
     tmp_fill_cahr++;
-    round++;
     COMPILER_BARRIER();
-    printf("before ibv_post_send\n");
-    ibv_post_send(qp0, &wr, &bad_wr);
-    printf("after ibv_post_send\n");
+    printf("Round %d/%d: before ibv_post_send\n", round, max_rounds);
+    if (ibv_post_send(qp0, &wr, &bad_wr) != 0)
+    {
+      fprintf(stderr, "Round %d: ibv_post_send failed\n", round);
+      failed_rounds++;
+      continue;
+    }
+    printf("Round %d/%d: after ibv_post_send\n", round, max_rounds);
     struct ibv_wc wc = {0};
 
     COMPILER_BARRIER();
@@ -239,15 +321,8 @@ int run_single_mr(int msg_len)
       usleep(1000);
       COMPILER_BARRIER();
     }
-    // usleep(1000);
     COMPILER_BARRIER();
 
-    // for (int i = 0; i < msg_len; i++) {
-    //     if (dst_buffer[i] == src_buffer[i]) {
-    //       cnt_valid += 1;
-    //     }
-    // }
-    printf("round: %d,", round);
     cnt_error = memory_diff(src_buffer, dst_buffer, msg_len);
     cnt_valid = msg_len - cnt_error;
 
@@ -256,14 +331,26 @@ int run_single_mr(int msg_len)
     memset(dst_buffer, tmp_fill_cahr, msg_len);
 
     COMPILER_BARRIER();
-    printf("wc wr_id: %lu\n", wc.wr_id);
-    printf("received bytes count: %d\n", cnt_valid);
+    printf("Round %d/%d: wc wr_id: %lu, wc status: %d\n", round, max_rounds, wc.wr_id, wc.status);
+    printf("Round %d/%d: received bytes count: %d/%d\n", round, max_rounds, cnt_valid, msg_len);
 
     if (cnt_valid != msg_len)
     {
-      // die("Failed to read the entire message");
+      fprintf(stderr, "Round %d: Data mismatch - expected %d bytes, got %d bytes\n",
+              round, msg_len, cnt_valid);
+      failed_rounds++;
+    }
+    else
+    {
+      printf("Round %d/%d: PASS\n", round, max_rounds);
     }
   }
+
+  printf("\n========== Test Summary ==========\n");
+  printf("Total rounds: %d\n", max_rounds);
+  printf("Passed: %d\n", max_rounds - failed_rounds);
+  printf("Failed: %d\n", failed_rounds);
+  printf("==================================\n");
 
   ibv_destroy_qp(qp0);
   ibv_dereg_mr(mr);

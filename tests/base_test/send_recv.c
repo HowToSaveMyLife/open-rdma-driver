@@ -10,7 +10,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#define BUF_SIZE (256UL * 1024)
+// BUF_SIZE will be set based on msg_len parameter
 #define PORT 12346
 
 struct rdma_context
@@ -24,7 +24,7 @@ struct rdma_context
 };
 
 void die(const char *reason);
-void setup_ib(struct rdma_context *ctx, bool is_client);
+void setup_ib(struct rdma_context *ctx, bool is_client, int msg_len);
 void exchange_info(int sock, struct rdma_context *ctx, uint32_t *rkey,
                    uint64_t *raddr, uint32_t *dqpn);
 void run_server(int msg_len);
@@ -37,7 +37,7 @@ void die(const char *reason)
   exit(EXIT_FAILURE);
 }
 
-void setup_ib(struct rdma_context *ctx, bool is_client)
+void setup_ib(struct rdma_context *ctx, bool is_client, int msg_len)
 {
   printf("[DEBUG] setup_ib: Starting IB setup (is_client=%d)\n", is_client);
 
@@ -70,14 +70,14 @@ void setup_ib(struct rdma_context *ctx, bool is_client)
   if (!ctx->pd)
     die("Failed to allocate PD");
 
-  printf("[DEBUG] setup_ib: Allocating buffer (size=%lu bytes)...\n", BUF_SIZE);
-  ctx->buffer = mmap(NULL, BUF_SIZE, PROT_READ | PROT_WRITE,
+  printf("[DEBUG] setup_ib: Allocating buffer (size=%lu bytes)...\n", msg_len);
+  ctx->buffer = mmap(NULL, msg_len, PROT_READ | PROT_WRITE,
                      MAP_SHARED | MAP_ANONYMOUS | MAP_HUGETLB | MAP_POPULATE, -1, 0);
   if (ctx->buffer == MAP_FAILED)
   {
     printf("[DEBUG] setup_ib: mmap with MAP_HUGETLB failed, retrying without it\n");
     // Retry without MAP_HUGETLB for simulator compatibility
-    ctx->buffer = mmap(NULL, BUF_SIZE, PROT_READ | PROT_WRITE,
+    ctx->buffer = mmap(NULL, msg_len, PROT_READ | PROT_WRITE,
                        MAP_SHARED | MAP_ANONYMOUS | MAP_POPULATE, -1, 0);
     if (ctx->buffer == MAP_FAILED)
       die("Failed to mmap buffer");
@@ -92,8 +92,8 @@ void setup_ib(struct rdma_context *ctx, bool is_client)
   printf("[DEBUG] setup_ib: Fixed buffer address set to %p\n", ctx->buffer);
 #endif
 
-  printf("[DEBUG] setup_ib: Registering MR (addr=%p, size=%lu)...\n", ctx->buffer, BUF_SIZE);
-  ctx->mr = ibv_reg_mr(ctx->pd, ctx->buffer, BUF_SIZE,
+  printf("[DEBUG] setup_ib: Registering MR (addr=%p, size=%lu)...\n", ctx->buffer, msg_len);
+  ctx->mr = ibv_reg_mr(ctx->pd, ctx->buffer, msg_len,
                        IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
                            IBV_ACCESS_REMOTE_READ);
   printf("[DEBUG] setup_ib: ibv_reg_mr returned mr=%p\n", (void *)ctx->mr);
@@ -250,7 +250,7 @@ void run_server(int msg_len)
   printf("[DEBUG] run_server: rdma_context allocated on stack at %p\n", (void *)&ctx);
 
   printf("[DEBUG] run_server: Calling setup_ib (is_client=false)...\n");
-  setup_ib(&ctx, false);
+  setup_ib(&ctx, false, msg_len);
   printf("[DEBUG] run_server: setup_ib completed\n");
 
   printf("[DEBUG] run_server: Creating TCP socket...\n");
@@ -282,7 +282,7 @@ void run_server(int msg_len)
   int client_sock = accept(sock, NULL, NULL);
   printf("[DEBUG] run_server: Client connected (client_sock=%d)\n", client_sock);
 
-  printf("[DEBUG] run_server: Zeroing buffer at %p (size=%lu)\n", ctx.buffer, BUF_SIZE);
+  printf("[DEBUG] run_server: Zeroing buffer at %p (size=%d)\n", ctx.buffer, msg_len);
 
   // Check if buffer pointer is valid
   if (ctx.buffer == NULL)
@@ -294,7 +294,7 @@ void run_server(int msg_len)
   printf("[DEBUG] run_server: Buffer pointer validated, starting memset...\n");
   fflush(stdout); // Ensure log is written before potential crash
 
-  memset(ctx.buffer, 0, BUF_SIZE);
+  memset(ctx.buffer, 0, msg_len);
 
   printf("[DEBUG] run_server: Buffer cleared successfully\n");
 
@@ -354,7 +354,7 @@ void run_server(int msg_len)
          wc.status, wc.opcode, wc.byte_len);
 
   printf("[DEBUG] run_server: Validating received data...\n");
-  for (int i = 0; i < BUF_SIZE; i++)
+  for (int i = 0; i < msg_len; i++)
   {
     if (ctx.buffer[i] == 'c')
     {
@@ -381,7 +381,7 @@ void run_client(int msg_len, char *server_ip)
   printf("[DEBUG] run_client: rdma_context allocated on stack at %p\n", (void *)&ctx);
 
   printf("[DEBUG] run_client: Calling setup_ib (is_client=true)...\n");
-  setup_ib(&ctx, true);
+  setup_ib(&ctx, true, msg_len);
   printf("[DEBUG] run_client: setup_ib completed\n");
 
   printf("[DEBUG] run_client: Creating TCP socket...\n");
