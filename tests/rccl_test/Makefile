@@ -169,16 +169,18 @@ nompi_hack_rank0: $(NOMPI_TARGET)
 	@echo "Using RDMA device: bluerdma0 only"
 	@echo "Run 'make nompi_rank1' in another terminal"
 	@echo ""
-	export NCCL_DEBUG=INFO && \
-	export NCCL_IB_DISABLE=0 && \
-	export NCCL_IB_HCA=bluerdma0 && \
-	export UCX_NET_DEVICES=blue0 && \
-	export NCCL_NET_GDR_LEVEL=0 && \
-	export NCCL_P2P_DISABLE=1 && \
-	export NCCL_SHM_DISABLE=1 && \
-	export LD_PRELOAD=$(HACK_LD_LIB) && \
-	export RUST_LOG=INFO && \
-	$(NOMPI_TARGET) 0
+	sudo env \
+		NCCL_DEBUG=INFO \
+		NCCL_IB_DISABLE=0 \
+		NCCL_IB_HCA=bluerdma0 \
+		UCX_NET_DEVICES=blue0 \
+		NCCL_NET_GDR_LEVEL=0 \
+		NCCL_P2P_DISABLE=1 \
+		NCCL_SHM_DISABLE=1 \
+		LD_PRELOAD=$(HACK_LD_LIB) \
+		RUST_LOG=INFO \
+		LD_LIBRARY_PATH="$$LD_LIBRARY_PATH" \
+		$(NOMPI_TARGET) 0
 
 # Run normal_test_nompi as rank 1 (client)
 nompi_hack_rank1: $(NOMPI_TARGET)
@@ -188,16 +190,18 @@ nompi_hack_rank1: $(NOMPI_TARGET)
 	@echo "Using RDMA device: bluerdma1 only"
 	@echo "Connecting to rank 0..."
 	@echo ""
-	export NCCL_DEBUG=INFO && \
-	export NCCL_IB_DISABLE=0 && \
-	export NCCL_IB_HCA=bluerdma1 && \
-	export UCX_NET_DEVICES=blue1 && \
-	export NCCL_NET_GDR_LEVEL=0 && \
-	export NCCL_P2P_DISABLE=1 && \
-	export NCCL_SHM_DISABLE=1 && \
-	export LD_PRELOAD=$(HACK_LD_LIB) && \
-	export RUST_LOG=INFO && \
-	$(NOMPI_TARGET) 1
+	sudo env \
+		NCCL_DEBUG=INFO \
+		NCCL_IB_DISABLE=0 \
+		NCCL_IB_HCA=bluerdma1 \
+		UCX_NET_DEVICES=blue1 \
+		NCCL_NET_GDR_LEVEL=0 \
+		NCCL_P2P_DISABLE=1 \
+		NCCL_SHM_DISABLE=1 \
+		LD_PRELOAD=$(HACK_LD_LIB) \
+		RUST_LOG=INFO \
+		LD_LIBRARY_PATH="$$LD_LIBRARY_PATH" \
+		$(NOMPI_TARGET) 1
 
 
 

@@ -114,6 +114,10 @@ void exchangeNcclId(int rank, ncclUniqueId *id)
 
 int main(int argc, char *argv[])
 {
+    // Disable stdout buffering for proper output redirection
+    setbuf(stdout, NULL);
+    setbuf(stderr, NULL);
+
     if (argc != 2)
     {
         printf("Usage: %s <rank>\n", argv[0]);

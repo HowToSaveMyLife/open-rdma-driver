@@ -41,7 +41,7 @@ cd $SCRIPT_DIR/..
 
 # 先启动 server
 echo "Starting server..."
-RUST_LOG=info ./build/send_recv $MSG_LEN &> $LOG_DIR/send_recv-server.log &
+sudo env RUST_LOG=info LD_LIBRARY_PATH="$LD_LIBRARY_PATH" ./build/send_recv $MSG_LEN &> $LOG_DIR/send_recv-server.log &
 SERVER_PID=$!
 
 echo "Server PID: $SERVER_PID"
@@ -51,7 +51,7 @@ sleep 3
 
 # 启动 client，连接到 localhost
 echo "Starting client..."
-RUST_LOG=info ./build/send_recv $MSG_LEN 127.0.0.1 &> $LOG_DIR/send_recv-client.log &
+sudo env RUST_LOG=info LD_LIBRARY_PATH="$LD_LIBRARY_PATH" ./build/send_recv $MSG_LEN 127.0.0.1 &> $LOG_DIR/send_recv-client.log &
 CLIENT_PID=$!
 
 echo "Client PID: $CLIENT_PID"

@@ -77,7 +77,7 @@ int run_single_mr(int msg_len)
 
   // Calculate buffer size based on msg_len, with some headroom
   // Ensure it's at least DEFAULT_BUF_SIZE and aligned to page boundary
-  size_t buf_size = msg_len * 2;
+  size_t buf_size = msg_len;
   if (buf_size < DEFAULT_BUF_SIZE)
   {
     buf_size = DEFAULT_BUF_SIZE;
