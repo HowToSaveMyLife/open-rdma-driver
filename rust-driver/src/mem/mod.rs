@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::types::{PhysAddr, VirtAddr};
+use crate::types::{PageAlignedPhysAddr, PageAlignedVirtAddr, PhysAddr, VirtAddr};
 
 /// Tools for converting virtual address to physicall address
 pub(crate) mod virt_to_phy;
@@ -176,9 +176,9 @@ impl AddressResolver for HostUmemHandler {
 
     fn virt_to_phys_range(
         &self,
-        start_addr: VirtAddr,
+        start_addr: PageAlignedVirtAddr,
         num_pages: usize,
-    ) -> io::Result<Vec<Option<PhysAddr>>> {
+    ) -> io::Result<Vec<Option<PageAlignedPhysAddr>>> {
         self.resolver.virt_to_phys_range(start_addr, num_pages)
     }
 }
@@ -208,7 +208,9 @@ impl MemoryPinner for EmulatedUmemHandler {
         }
 
         let num_pages = get_num_page(addr.as_u64(), length);
-        let pas = self.resolver.virt_to_phys_range(addr, num_pages)?;
+        // Align down to page boundary for virt_to_phys_range
+        let aligned_addr = PageAlignedVirtAddr::align_down(addr);
+        let pas = self.resolver.virt_to_phys_range(aligned_addr, num_pages)?;
         for (i, pa) in pas.iter().enumerate() {
             // TODO 增加错误处理，不够严谨
             let pa = pa.unwrap();
@@ -216,7 +218,8 @@ impl MemoryPinner for EmulatedUmemHandler {
                 .offset(i as u64 * PAGE_SIZE as u64)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "address overflow"))?;
             let mut pa_va_map = self.pa_va_map.write();
-            pa_va_map.insert(pa, va, PAGE_SIZE);
+            // Convert aligned phys addr to regular PhysAddr for pa_va_map
+            pa_va_map.insert(pa.into_inner(), va, PAGE_SIZE);
         }
         Ok(())
     }
@@ -231,13 +234,16 @@ impl MemoryPinner for EmulatedUmemHandler {
         }
 
         let num_pages = get_num_page(addr.as_u64(), length);
-        let pas = self.resolver.virt_to_phys_range(addr, num_pages)?;
+        // Align down to page boundary for virt_to_phys_range
+        let aligned_addr = PageAlignedVirtAddr::align_down(addr);
+        let pas = self.resolver.virt_to_phys_range(aligned_addr, num_pages)?;
         for (i, pa) in pas.iter().enumerate() {
             // TODO 增加错误处理，不够严谨
             let pa = pa.unwrap();
 
             let mut pa_va_map = self.pa_va_map.write();
-            pa_va_map.remove(pa);
+            // Convert aligned phys addr to regular PhysAddr for pa_va_map
+            pa_va_map.remove(pa.into_inner());
         }
         Ok(())
     }

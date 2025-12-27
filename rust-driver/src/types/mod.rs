@@ -5,4 +5,9 @@
 
 pub(crate) mod addr;
 
-pub(crate) use addr::{CsrOffset, PhysAddr, RemoteAddr, VirtAddr};
+pub(crate) use addr::{
+    AlignedPhysAddr, AlignedVirtAddr, CacheAlignedPhysAddr, CacheAlignedVirtAddr, CsrOffset,
+    GigaPageAlignedPhysAddr, GigaPageAlignedVirtAddr, HugePageAlignedPhysAddr,
+    HugePageAlignedVirtAddr, PageAlignedPhysAddr, PageAlignedVirtAddr, PhysAddr, RemoteAddr,
+    VirtAddr,
+};

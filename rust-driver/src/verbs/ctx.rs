@@ -39,7 +39,7 @@ use crate::{
         },
     },
     ringbuf::DescRingBufAllocator,
-    types::{PhysAddr, RemoteAddr, VirtAddr},
+    types::{PageAlignedVirtAddr, PhysAddr, RemoteAddr, VirtAddr},
     workers::{
         ack_responder::AckResponder,
         completion::{
@@ -291,9 +291,10 @@ where
         let length_u32 = u32::try_from(length)
             .map_err(|_err| RdmaError::InvalidInput("Length too large".into()))?;
 
-        let aligned_va = virt_addr.as_u64() >> PAGE_SIZE_BITS << PAGE_SIZE_BITS;
+        // Use type-safe alignment instead of manual bit manipulation
+        let aligned_va = virt_addr.to_alignd();
         let phys_addrs = umem_handler
-            .virt_to_phys_range(VirtAddr::new(aligned_va), num_pages)?
+            .virt_to_phys_range(aligned_va, num_pages)?
             .into_iter()
             .collect::<Option<Vec<_>>>()
             .ok_or(RdmaError::MemoryError("Physical address not found".into()))?;

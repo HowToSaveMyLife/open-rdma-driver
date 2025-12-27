@@ -5,7 +5,7 @@ use std::{
 
 use log::debug;
 
-use crate::types::{PhysAddr, VirtAddr};
+use crate::types::{PageAlignedPhysAddr, PageAlignedVirtAddr, PhysAddr, VirtAddr};
 
 /// Size of the PFN (Page Frame Number) mask in bytes
 const PFN_MASK_SIZE: usize = 8;
@@ -38,31 +38,39 @@ pub(crate) trait AddressResolver {
     /// Returns an IO error if address resolving fails.
     fn virt_to_phys(&self, virt_addr: VirtAddr) -> io::Result<Option<PhysAddr>>;
 
-    /// Converts a range of virtual addresses to physical addresses
+    /// Converts a range of page-aligned virtual addresses to physical addresses
+    ///
+    /// # Arguments
+    ///
+    /// * `start_addr` - Page-aligned virtual address (alignment guaranteed by type system)
+    /// * `num_pages` - Number of pages to translate
     ///
     /// # Returns
     ///
-    /// A vector of optional physical addresses. `None` indicates
+    /// A vector of optional page-aligned physical addresses. `None` indicates
     /// the page is not present in physical memory.
     ///
     /// # Errors
     ///
     /// Returns an IO error if address resolving fails.
-    #[allow(clippy::as_conversions)]
+    #[allow(clippy::as_conversions, unsafe_code)]
     fn virt_to_phys_range(
         &self,
-        start_addr: VirtAddr,
+        start_addr: PageAlignedVirtAddr,
         num_pages: usize,
-    ) -> io::Result<Vec<Option<PhysAddr>>> {
-        //TODO 需要增加对齐类型
-        assert!(start_addr.is_aligned_to(PAGE_SIZE));
-
+    ) -> io::Result<Vec<Option<PageAlignedPhysAddr>>> {
+        // No need for runtime alignment check - type system guarantees it!
         (0..num_pages as u64)
             .map(|x| {
-                let addr = start_addr.offset(x * PAGE_SIZE).ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidInput, "address overflow")
-                })?;
-                self.virt_to_phys(addr)
+                let addr = start_addr
+                    .into_inner()
+                    .offset(x * PAGE_SIZE)
+                    .ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::InvalidInput, "address overflow")
+                    })?;
+                let phys_addr = self.virt_to_phys(addr)?;
+                // SAFETY: Physical pages from kernel are always page-aligned
+                Ok(phys_addr.map(|pa| unsafe { PageAlignedPhysAddr::new_unchecked(pa) }))
             })
             .collect::<Result<_, _>>()
     }
@@ -75,11 +83,11 @@ pub(crate) type PhysAddrResolver = PhysAddrResolverLinuxX86;
 
 pub(crate) struct PhysAddrResolverLinuxX86;
 
-// TODO 需要重构，使得类型更为严谨
 #[allow(
     clippy::as_conversions,
     clippy::arithmetic_side_effects,
-    clippy::host_endian_bytes
+    clippy::host_endian_bytes,
+    unsafe_code
 )]
 impl AddressResolver for PhysAddrResolverLinuxX86 {
     fn virt_to_phys(&self, virt_addr: VirtAddr) -> io::Result<Option<PhysAddr>> {
@@ -120,15 +128,11 @@ impl AddressResolver for PhysAddrResolverLinuxX86 {
 
     fn virt_to_phys_range(
         &self,
-        start_addr: VirtAddr,
+        start_addr: PageAlignedVirtAddr,
         num_pages: usize,
-    ) -> io::Result<Vec<Option<PhysAddr>>> {
-        if (start_addr.as_u64() % PAGE_SIZE != 0) {
-            log::warn!("start_addr: {start_addr:x} is not page aligned");
-        }
-
-        //TODO 对齐也许可以做的更优雅
-        let start_addr_raw = start_addr.as_u64() / PAGE_SIZE * PAGE_SIZE;
+    ) -> io::Result<Vec<Option<PageAlignedPhysAddr>>> {
+        // Type system guarantees alignment - no runtime check needed!
+        let start_addr_raw = start_addr.as_u64();
         let base_page_size = get_base_page_size();
         let mut phy_addrs = vec![None; num_pages];
         let mut file = File::open("/proc/self/pagemap")?;
@@ -147,7 +151,8 @@ impl AddressResolver for PhysAddrResolverLinuxX86 {
                 log::warn!("entry is {entry:x}");
                 let phys_pfn = entry & PFN_MASK;
                 let phys_addr = phys_pfn * base_page_size + start_addr_raw % base_page_size;
-                *pa = Some(PhysAddr::new(phys_addr));
+                // SAFETY: Physical pages from kernel pagemap are always page-aligned
+                *pa = Some(unsafe { PageAlignedPhysAddr::new_unchecked(PhysAddr::new(phys_addr)) });
 
                 maybe_gpu_ptr = false;
             }
@@ -172,7 +177,8 @@ impl AddressResolver for PhysAddrResolverLinuxX86 {
                 if (entry >> PAGE_PRESENT_BIT) & 1 != 0 {
                     let phys_pfn = entry & PFN_MASK;
                     let phys_addr = phys_pfn * base_page_size + start_addr_raw % base_page_size;
-                    *pa = Some(PhysAddr::new(phys_addr));
+                    // SAFETY: GPU physical pages are also page-aligned
+                    *pa = Some(unsafe { PageAlignedPhysAddr::new_unchecked(PhysAddr::new(phys_addr)) });
                 }
 
                 addr += PAGE_SIZE;
