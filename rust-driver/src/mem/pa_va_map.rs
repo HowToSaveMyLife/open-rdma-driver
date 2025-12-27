@@ -257,11 +257,20 @@ mod tests {
 
         // Lookup addresses within the range
         // At PA 0x1000: VA 0x7000, remaining = 0x2000 - 0x1000 = 0x1000 (4096 bytes)
-        assert_eq!(map.lookup(PhysAddr::new(0x1000)), Some((VirtAddr::new(0x7000), 0x1000)));
+        assert_eq!(
+            map.lookup(PhysAddr::new(0x1000)),
+            Some((VirtAddr::new(0x7000), 0x1000))
+        );
         // At PA 0x1500: VA 0x7500, remaining = 0x2000 - 0x1500 = 0xb00 (2816 bytes)
-        assert_eq!(map.lookup(PhysAddr::new(0x1500)), Some((VirtAddr::new(0x7500), 0xb00)));
+        assert_eq!(
+            map.lookup(PhysAddr::new(0x1500)),
+            Some((VirtAddr::new(0x7500), 0xb00))
+        );
         // At PA 0x1fff: VA 0x7fff, remaining = 0x2000 - 0x1fff = 1 byte
-        assert_eq!(map.lookup(PhysAddr::new(0x1fff)), Some((VirtAddr::new(0x7fff), 1)));
+        assert_eq!(
+            map.lookup(PhysAddr::new(0x1fff)),
+            Some((VirtAddr::new(0x7fff), 1))
+        );
 
         // Lookup addresses outside the range
         assert_eq!(map.lookup(PhysAddr::new(0x0fff)), None);
@@ -282,17 +291,29 @@ mod tests {
 
         // Lookup in first range
         // At PA 0x1500: remaining = 0x2000 - 0x1500 = 0xb00
-        assert_eq!(map.lookup(PhysAddr::new(0x1500)), Some((VirtAddr::new(0x7500), 0xb00)));
+        assert_eq!(
+            map.lookup(PhysAddr::new(0x1500)),
+            Some((VirtAddr::new(0x7500), 0xb00))
+        );
 
         // Lookup in second range
         // At PA 0x3500: remaining = 0x5000 - 0x3500 = 0x1b00
-        assert_eq!(map.lookup(PhysAddr::new(0x3500)), Some((VirtAddr::new(0x8500), 0x1b00)));
+        assert_eq!(
+            map.lookup(PhysAddr::new(0x3500)),
+            Some((VirtAddr::new(0x8500), 0x1b00))
+        );
         // At PA 0x4fff: remaining = 0x5000 - 0x4fff = 1
-        assert_eq!(map.lookup(PhysAddr::new(0x4fff)), Some((VirtAddr::new(0x9fff), 1)));
+        assert_eq!(
+            map.lookup(PhysAddr::new(0x4fff)),
+            Some((VirtAddr::new(0x9fff), 1))
+        );
 
         // Lookup in third range
         // At PA 0x6500: remaining = 0x7000 - 0x6500 = 0xb00
-        assert_eq!(map.lookup(PhysAddr::new(0x6500)), Some((VirtAddr::new(0xa500), 0xb00)));
+        assert_eq!(
+            map.lookup(PhysAddr::new(0x6500)),
+            Some((VirtAddr::new(0xa500), 0xb00))
+        );
 
         // Lookup in gaps
         assert_eq!(map.lookup(PhysAddr::new(0x2000)), None);
@@ -305,7 +326,10 @@ mod tests {
         let mut map = PaVaMap::new();
 
         map.insert(PhysAddr::new(0x1000), VirtAddr::new(0x7000), 0x1000);
-        assert_eq!(map.lookup(PhysAddr::new(0x1500)), Some((VirtAddr::new(0x7500), 0xb00)));
+        assert_eq!(
+            map.lookup(PhysAddr::new(0x1500)),
+            Some((VirtAddr::new(0x7500), 0xb00))
+        );
 
         map.remove(PhysAddr::new(0x1000));
         assert_eq!(map.lookup(PhysAddr::new(0x1500)), None);
@@ -333,9 +357,15 @@ mod tests {
 
         // Both ranges should be accessible
         // At PA 0x1fff: last byte of first range, remaining = 1
-        assert_eq!(map.lookup(PhysAddr::new(0x1fff)), Some((VirtAddr::new(0x7fff), 1)));
+        assert_eq!(
+            map.lookup(PhysAddr::new(0x1fff)),
+            Some((VirtAddr::new(0x7fff), 1))
+        );
         // At PA 0x2000: first byte of second range, remaining = 0x1000
-        assert_eq!(map.lookup(PhysAddr::new(0x2000)), Some((VirtAddr::new(0x8000), 0x1000)));
+        assert_eq!(
+            map.lookup(PhysAddr::new(0x2000)),
+            Some((VirtAddr::new(0x8000), 0x1000))
+        );
     }
 
     #[test]
@@ -368,8 +398,14 @@ mod tests {
         map.insert(PhysAddr::new(0x3000), VirtAddr::new(0x8000), 0x2000);
 
         // Test VA → PA lookups (exact matches only)
-        assert_eq!(map.lookup_by_va(VirtAddr::new(0x7000)), Some(PhysAddr::new(0x1000)));
-        assert_eq!(map.lookup_by_va(VirtAddr::new(0x8000)), Some(PhysAddr::new(0x3000)));
+        assert_eq!(
+            map.lookup_by_va(VirtAddr::new(0x7000)),
+            Some(PhysAddr::new(0x1000))
+        );
+        assert_eq!(
+            map.lookup_by_va(VirtAddr::new(0x8000)),
+            Some(PhysAddr::new(0x3000))
+        );
 
         // Non-existent VA
         assert_eq!(map.lookup_by_va(VirtAddr::new(0x9000)), None);
@@ -386,11 +422,20 @@ mod tests {
         map.insert(PhysAddr::new(0x1000), VirtAddr::new(0x7000), 0x1000);
 
         // Test PA → VA (with remaining length)
-        assert_eq!(map.lookup(PhysAddr::new(0x1000)), Some((VirtAddr::new(0x7000), 0x1000)));
-        assert_eq!(map.lookup(PhysAddr::new(0x1500)), Some((VirtAddr::new(0x7500), 0xb00)));
+        assert_eq!(
+            map.lookup(PhysAddr::new(0x1000)),
+            Some((VirtAddr::new(0x7000), 0x1000))
+        );
+        assert_eq!(
+            map.lookup(PhysAddr::new(0x1500)),
+            Some((VirtAddr::new(0x7500), 0xb00))
+        );
 
         // Test VA → PA
-        assert_eq!(map.lookup_by_va(VirtAddr::new(0x7000)), Some(PhysAddr::new(0x1000)));
+        assert_eq!(
+            map.lookup_by_va(VirtAddr::new(0x7000)),
+            Some(PhysAddr::new(0x1000))
+        );
     }
 
     #[test]
@@ -401,8 +446,14 @@ mod tests {
         map.insert(PhysAddr::new(0x1000), VirtAddr::new(0x7000), 0x1000);
 
         // Verify it exists
-        assert_eq!(map.lookup_by_va(VirtAddr::new(0x7000)), Some(PhysAddr::new(0x1000)));
-        assert_eq!(map.lookup(PhysAddr::new(0x1000)), Some((VirtAddr::new(0x7000), 0x1000)));
+        assert_eq!(
+            map.lookup_by_va(VirtAddr::new(0x7000)),
+            Some(PhysAddr::new(0x1000))
+        );
+        assert_eq!(
+            map.lookup(PhysAddr::new(0x1000)),
+            Some((VirtAddr::new(0x7000), 0x1000))
+        );
 
         // Remove by VA
         map.remove_by_va(VirtAddr::new(0x7000));
@@ -421,8 +472,14 @@ mod tests {
         map.insert(PhysAddr::new(0x1000), VirtAddr::new(0x7000), 0x1000);
 
         // Verify it exists
-        assert_eq!(map.lookup_by_va(VirtAddr::new(0x7000)), Some(PhysAddr::new(0x1000)));
-        assert_eq!(map.lookup(PhysAddr::new(0x1000)), Some((VirtAddr::new(0x7000), 0x1000)));
+        assert_eq!(
+            map.lookup_by_va(VirtAddr::new(0x7000)),
+            Some(PhysAddr::new(0x1000))
+        );
+        assert_eq!(
+            map.lookup(PhysAddr::new(0x1000)),
+            Some((VirtAddr::new(0x7000), 0x1000))
+        );
 
         // Remove by PA (original method)
         map.remove(PhysAddr::new(0x1000));
@@ -443,22 +500,46 @@ mod tests {
         map.insert(PhysAddr::new(0x6000), VirtAddr::new(0xa000), 0x1000);
 
         // Test all VA → PA lookups
-        assert_eq!(map.lookup_by_va(VirtAddr::new(0x7000)), Some(PhysAddr::new(0x1000)));
-        assert_eq!(map.lookup_by_va(VirtAddr::new(0x8000)), Some(PhysAddr::new(0x3000)));
-        assert_eq!(map.lookup_by_va(VirtAddr::new(0xa000)), Some(PhysAddr::new(0x6000)));
+        assert_eq!(
+            map.lookup_by_va(VirtAddr::new(0x7000)),
+            Some(PhysAddr::new(0x1000))
+        );
+        assert_eq!(
+            map.lookup_by_va(VirtAddr::new(0x8000)),
+            Some(PhysAddr::new(0x3000))
+        );
+        assert_eq!(
+            map.lookup_by_va(VirtAddr::new(0xa000)),
+            Some(PhysAddr::new(0x6000))
+        );
 
         // Test all PA → VA lookups (with remaining length)
-        assert_eq!(map.lookup(PhysAddr::new(0x1000)), Some((VirtAddr::new(0x7000), 0x1000)));
-        assert_eq!(map.lookup(PhysAddr::new(0x3000)), Some((VirtAddr::new(0x8000), 0x2000)));
-        assert_eq!(map.lookup(PhysAddr::new(0x6000)), Some((VirtAddr::new(0xa000), 0x1000)));
+        assert_eq!(
+            map.lookup(PhysAddr::new(0x1000)),
+            Some((VirtAddr::new(0x7000), 0x1000))
+        );
+        assert_eq!(
+            map.lookup(PhysAddr::new(0x3000)),
+            Some((VirtAddr::new(0x8000), 0x2000))
+        );
+        assert_eq!(
+            map.lookup(PhysAddr::new(0x6000)),
+            Some((VirtAddr::new(0xa000), 0x1000))
+        );
 
         // Remove middle range by VA
         map.remove_by_va(VirtAddr::new(0x8000));
 
         // Verify only that range is removed
-        assert_eq!(map.lookup_by_va(VirtAddr::new(0x7000)), Some(PhysAddr::new(0x1000)));
+        assert_eq!(
+            map.lookup_by_va(VirtAddr::new(0x7000)),
+            Some(PhysAddr::new(0x1000))
+        );
         assert_eq!(map.lookup_by_va(VirtAddr::new(0x8000)), None);
-        assert_eq!(map.lookup_by_va(VirtAddr::new(0xa000)), Some(PhysAddr::new(0x6000)));
+        assert_eq!(
+            map.lookup_by_va(VirtAddr::new(0xa000)),
+            Some(PhysAddr::new(0x6000))
+        );
         assert_eq!(map.len(), 2);
     }
 
@@ -491,17 +572,38 @@ mod tests {
         map.insert(PhysAddr::new(0x1000), VirtAddr::new(0x7000), 0x1000);
 
         // Test remaining length at different offsets
-        assert_eq!(map.lookup(PhysAddr::new(0x1000)), Some((VirtAddr::new(0x7000), 0x1000))); // 4096 bytes remaining
-        assert_eq!(map.lookup(PhysAddr::new(0x1001)), Some((VirtAddr::new(0x7001), 0xfff))); // 4095 bytes remaining
-        assert_eq!(map.lookup(PhysAddr::new(0x1800)), Some((VirtAddr::new(0x7800), 0x800))); // 2048 bytes remaining
-        assert_eq!(map.lookup(PhysAddr::new(0x1fff)), Some((VirtAddr::new(0x7fff), 1))); // 1 byte remaining
+        assert_eq!(
+            map.lookup(PhysAddr::new(0x1000)),
+            Some((VirtAddr::new(0x7000), 0x1000))
+        ); // 4096 bytes remaining
+        assert_eq!(
+            map.lookup(PhysAddr::new(0x1001)),
+            Some((VirtAddr::new(0x7001), 0xfff))
+        ); // 4095 bytes remaining
+        assert_eq!(
+            map.lookup(PhysAddr::new(0x1800)),
+            Some((VirtAddr::new(0x7800), 0x800))
+        ); // 2048 bytes remaining
+        assert_eq!(
+            map.lookup(PhysAddr::new(0x1fff)),
+            Some((VirtAddr::new(0x7fff), 1))
+        ); // 1 byte remaining
 
         // Insert a larger range to test: PA [0x10000, 0x20000) -> VA [0x50000, 0x60000)
         map.insert(PhysAddr::new(0x10000), VirtAddr::new(0x50000), 0x10000);
 
         // Test various positions in the 64KB range
-        assert_eq!(map.lookup(PhysAddr::new(0x10000)), Some((VirtAddr::new(0x50000), 0x10000))); // 65536 bytes
-        assert_eq!(map.lookup(PhysAddr::new(0x18000)), Some((VirtAddr::new(0x58000), 0x8000))); // 32768 bytes
-        assert_eq!(map.lookup(PhysAddr::new(0x1ffff)), Some((VirtAddr::new(0x5ffff), 1))); // 1 byte
+        assert_eq!(
+            map.lookup(PhysAddr::new(0x10000)),
+            Some((VirtAddr::new(0x50000), 0x10000))
+        ); // 65536 bytes
+        assert_eq!(
+            map.lookup(PhysAddr::new(0x18000)),
+            Some((VirtAddr::new(0x58000), 0x8000))
+        ); // 32768 bytes
+        assert_eq!(
+            map.lookup(PhysAddr::new(0x1ffff)),
+            Some((VirtAddr::new(0x5ffff), 1))
+        ); // 1 byte
     }
 }

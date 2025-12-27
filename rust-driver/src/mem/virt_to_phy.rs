@@ -54,6 +54,9 @@ pub(crate) trait AddressResolver {
         start_addr: VirtAddr,
         num_pages: usize,
     ) -> io::Result<Vec<Option<PhysAddr>>> {
+        //TODO 需要增加对齐类型
+        assert!(start_addr.is_aligned_to(PAGE_SIZE));
+
         (0..num_pages as u64)
             .map(|x| {
                 let addr = start_addr.offset(x * PAGE_SIZE).ok_or_else(|| {

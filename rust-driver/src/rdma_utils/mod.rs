@@ -1,4 +1,5 @@
 pub(crate) mod fragmenter;
+pub(crate) mod mr_region_manager;
 pub(crate) mod msn;
 pub(crate) mod mtt;
 pub(crate) mod pagemaps;

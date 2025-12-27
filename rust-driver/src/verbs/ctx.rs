@@ -17,7 +17,7 @@ use crate::{
     csr::{mode::Mode, DeviceAdaptor},
     mem::{
         get_num_page, page::PageAllocator, pin_pages, virt_to_phy::AddressResolver, DmaBuf,
-        DmaBufAllocator, MemoryPinner, PageWithPhysAddr, UmemHandler, PAGE_SIZE,
+        DmaBufAllocator, MemoryPinner, PageWithPhysAddr, UmemHandler, PAGE_SIZE, PAGE_SIZE_BITS,
     },
     net::{
         config::NetworkConfig,
@@ -277,7 +277,7 @@ where
 
         let umem_handler = self.device.new_umem_handler();
         let virt_addr = VirtAddr::new(addr);
-        umem_handler.pin_pages(virt_addr, length)?;
+        // umem_handler.pin_pages(virt_addr, length)?;
 
         //TODO maybe need to optimaze, it cost a lot
         #[cfg(feature = "page_size_2m")]
@@ -285,11 +285,15 @@ where
 
         let num_pages = get_num_page(addr, length);
         debug!("generate page table entries: addr=0x{addr:x}, length=0x{length:x} --> num_pages={num_pages}");
-        let (mr_key, pgt_entry) = self.mtt.register(num_pages)?;
+        let (mr_key, pgt_entry) = self
+            .mtt
+            .register(num_pages, virt_addr, length, &umem_handler)?;
         let length_u32 = u32::try_from(length)
             .map_err(|_err| RdmaError::InvalidInput("Length too large".into()))?;
+
+        let aligned_va = virt_addr.as_u64() >> PAGE_SIZE_BITS << PAGE_SIZE_BITS;
         let phys_addrs = umem_handler
-            .virt_to_phys_range(virt_addr, num_pages)?
+            .virt_to_phys_range(VirtAddr::new(aligned_va), num_pages)?
             .into_iter()
             .collect::<Option<Vec<_>>>()
             .ok_or(RdmaError::MemoryError("Physical address not found".into()))?;
@@ -332,7 +336,8 @@ where
     }
 
     fn dereg_mr(&mut self, mr_key: u32) -> Result<()> {
-        self.mtt.deregister(mr_key)
+        let umem_handler = self.device.new_umem_handler();
+        self.mtt.deregister(mr_key, &umem_handler)
     }
 
     fn create_qp(&mut self, attr: IbvQpInitAttr) -> Result<u32> {

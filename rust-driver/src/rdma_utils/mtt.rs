@@ -1,11 +1,15 @@
-use std::{collections::HashMap, io, iter, mem::take};
+use std::{collections::HashMap, io, iter, mem::take, ops::Range};
 
 use bitvec::{array::BitArray, bitarr};
 use rand::Rng;
 
 use crate::{
     constants::{LR_KEY_KEY_PART_WIDTH, MAX_MR_CNT, PGT_LEN},
-    mem::{get_num_page, page::ContiguousPages, virt_to_phy::AddressResolver, PAGE_SIZE},
+    mem::{
+        get_num_page, page::ContiguousPages, virt_to_phy::AddressResolver, UmemHandler, PAGE_SIZE,
+    },
+    rdma_utils::mr_region_manager::MrRegionManager,
+    types::VirtAddr,
     RdmaError,
 };
 
@@ -15,6 +19,9 @@ pub(crate) struct Mtt {
     alloc: Alloc,
     /// Table tracks `mr_key` to `PgtEntry` mapping
     mrkey_map: HashMap<u32, PgtEntry>,
+    /// TODO need to optimalize this, (va_start,length)
+    key_to_va_range: HashMap<u32, (VirtAddr, usize)>,
+    mr_manager: MrRegionManager,
 }
 
 impl Mtt {
@@ -23,11 +30,19 @@ impl Mtt {
         Self {
             alloc: Alloc::new(),
             mrkey_map: HashMap::new(),
+            key_to_va_range: HashMap::new(),
+            mr_manager: MrRegionManager::new(),
         }
     }
 
     /// Register a memory region
-    pub(crate) fn register(&mut self, num_pages: usize) -> io::Result<(u32, PgtEntry)> {
+    pub(crate) fn register(
+        &mut self,
+        num_pages: usize,
+        va_start: VirtAddr,
+        length: usize,
+        umem_handle: &impl UmemHandler,
+    ) -> io::Result<(u32, PgtEntry)> {
         let (mr_key, pgt_entry) = self
             .alloc
             .alloc(num_pages)
@@ -37,11 +52,24 @@ impl Mtt {
             "mr_key exist"
         );
 
+        // pin pages and record
+        debug_assert!(
+            self.key_to_va_range
+                .insert(mr_key, (va_start, length))
+                .is_none(),
+            "key_to_va_range mr_key exist"
+        );
+        self.mr_manager.insert(va_start, length, umem_handle);
+
         Ok((mr_key, pgt_entry))
     }
 
     /// Deregister a memory region
-    pub(crate) fn deregister(&mut self, mr_key: u32) -> crate::error::Result<()> {
+    pub(crate) fn deregister(
+        &mut self,
+        mr_key: u32,
+        umem_handle: &impl UmemHandler,
+    ) -> crate::error::Result<()> {
         let entry = self
             .mrkey_map
             .remove(&mr_key)
@@ -52,6 +80,13 @@ impl Mtt {
         {
             return Err(RdmaError::InvalidInput("failed to dealloc mr key".into()));
         }
+
+        // unpin pages and unrecord
+
+        let (va_start, length) = self.key_to_va_range.remove(&mr_key).unwrap();
+
+        self.mr_manager.remove(va_start, length, umem_handle);
+
         Ok(())
     }
 
