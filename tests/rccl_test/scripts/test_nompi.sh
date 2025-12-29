@@ -20,7 +20,12 @@ echo $(pwd)
 
 make
 
-make nompi_hack_rank0 &
-make nompi_hack_rank1 &
+make nompi_hack_rank0 &> $LOG_DIR/rccl-1.log &
+make nompi_hack_rank1 &> $LOG_DIR/rccl-2.log &
+
+
+
+# make nompi_hack_rank0 &
+# make nompi_hack_rank1 &
 wait
 
