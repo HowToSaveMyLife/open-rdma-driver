@@ -7,7 +7,7 @@ use std::{
 };
 
 use crossbeam_deque::Worker;
-use log::{debug, info};
+use log::{debug, error, info, trace};
 use parking_lot::Mutex;
 
 use crate::{
@@ -76,6 +76,7 @@ pub(crate) trait VerbsOps {
 }
 
 pub(crate) struct HwDeviceCtx<H: HwDevice> {
+    net_config: NetworkConfig,
     device: H,
     mtt: Mtt,
     mtt_buffer: DmaBuf,
@@ -86,6 +87,8 @@ pub(crate) struct HwDeviceCtx<H: HwDevice> {
     cmd_controller: CommandConfigurator<H::Adaptor>,
     post_recv_tx_table: PostRecvTxTable,
     recv_wr_queue_table: RecvWrQueueTable,
+    // TODO need to optimaze
+    pending_post_recv_queue: RecvWrQueueTable,
     rdma_write_tx: TaskTx<RdmaWriteTask>,
     completion_tx: TaskTx<CompletionTask>,
     config: DeviceConfig,
@@ -203,6 +206,7 @@ where
         std::mem::forget(simple_nic_rx); // prevent libc::munmap being called
 
         Ok(Self {
+            net_config,
             device,
             cmd_controller,
             qp_manager,
@@ -213,6 +217,7 @@ where
             mtt: Mtt::new(),
             post_recv_tx_table: PostRecvTxTable::new(),
             recv_wr_queue_table: RecvWrQueueTable::new(),
+            pending_post_recv_queue: RecvWrQueueTable::new(),
             rdma_write_tx,
             completion_tx,
             config,
@@ -383,7 +388,15 @@ where
             .map_qp_mut(qpn, |current| {
                 let current_ip = (current.dqp_ip != 0).then_some(current.dqp_ip);
                 let attr_ip = attr.dest_qp_ip().map(Ipv4Addr::to_bits);
-                let ip_addr = attr_ip.or(current_ip).unwrap_or(0);
+                let ip_addr = attr_ip.or(current_ip).unwrap_or_else(|| {
+                    if attr.qp_state() == Some(ibverbs_sys::ibv_qp_state::IBV_QPS_RTS) {
+                        let ip: Ipv4Addr = self.net_config.ip.ip();
+                        log::warn!("update qpn {} to RTS with default ip {}", qpn, ip);
+                        ip.to_bits()
+                    } else {
+                        0
+                    }
+                });
                 let entry = UpdateQp {
                     qpn,
                     ip_addr,
@@ -411,13 +424,33 @@ where
             .ok_or(RdmaError::NotFound(format!("QP {qpn} not found",)))?;
 
         if qp.dqpn != 0 && qp.dqp_ip != 0 && self.post_recv_tx_table.get_qp_mut(qpn).is_none() {
+            log::info!("start RTS!!!!!!");
             let dqp_ip = Ipv4Addr::from_bits(qp.dqp_ip);
             debug!("update_qp get dqp_ip={dqp_ip:?}");
+            log::info!("qp local ip is {},remote ip is {}", qp.ip, qp.dqp_ip);
             //TODO 这里不会有并发问题吗？在 qp 准备好之后，马上 post_recv，会不会出现问题？
             let (tx, rx) =
                 post_recv_channel::<TcpChannel>(qp.ip.into(), qp.dqp_ip.into(), qpn, qp.dqpn)?;
             debug!("after create post recv tx and rx table");
             self.post_recv_tx_table.insert(qpn, tx);
+
+            // 刷新 pending 队列中缓存的 RecvWr
+            if let Some(pending_queue) = self.pending_post_recv_queue.clone_recv_wr_queue(qpn) {
+                let mut queue = pending_queue.lock();
+                let pending_count = queue.len();
+                if pending_count > 0 {
+                    debug!("Flushing {pending_count} pending RecvWr for QP {qpn}");
+                    // 获取 tx 发送所有 pending 的 RecvWr
+                    if let Some(tx) = self.post_recv_tx_table.get_qp_mut(qpn) {
+                        while let Some(wr) = queue.pop_front() {
+                            if let Err(e) = tx.send(wr) {
+                                error!("Failed to send pending RecvWr for QP {qpn}: {e}");
+                            }
+                        }
+                    }
+                }
+            }
+
             let wr_queue =
                 self.recv_wr_queue_table
                     .clone_recv_wr_queue(qpn)
@@ -457,6 +490,8 @@ where
     }
 
     fn post_send(&mut self, qpn: u32, wr: SendWr) -> Result<()> {
+        debug!("post_send called, qpn is {qpn}, wr is {wr:?}");
+
         match wr {
             SendWr::Rdma(wr) => {
                 self.rdma_write(qpn, wr);
@@ -470,28 +505,44 @@ where
         let Some(cq) = self.cq_table.get_cq(handle) else {
             return vec![];
         };
-        iter::repeat_with(|| cq.pop_front())
+        let ret: Vec<Completion> = iter::repeat_with(|| cq.pop_front())
             .take_while(Option::is_some)
             .take(max_num_entries)
             .flatten()
-            .collect()
+            .collect();
+        if (!ret.is_empty()) {
+            debug!("poll_cq returned {ret:?}");
+        }
+        ret
     }
 
     fn post_recv(&mut self, qpn: u32, wr: RecvWr) -> Result<()> {
+        debug!("post_recv called, qpn is {qpn}, wr is {wr:?}");
         let qp = self
             .qp_attr_table
             .get_qp(qpn)
             .ok_or(RdmaError::QpError(format!("QP {qpn} not found",)))?;
+
+        // 注册 PostRecv 事件
         let event = Event::PostRecv(PostRecvEvent::new(qpn, wr.wr_id));
         self.completion_tx
             .send(CompletionTask::Register { qpn, event });
-        let tx = self
-            .post_recv_tx_table
-            .get_qp_mut(qpn)
-            .ok_or(RdmaError::QpError(format!(
-                "Post receive channel for QP {qpn} not found",
-            )))?;
-        tx.send(wr)?;
+
+        // 检查 tx 是否已创建
+        if let Some(tx) = self.post_recv_tx_table.get_qp_mut(qpn) {
+            // RTR/RTS 状态：直接发送
+            debug!("Sending RecvWr for QP {qpn} in RTR/RTS state");
+
+            let result = tx.send(wr);
+            debug!("result is {:?}", result);
+            result?;
+        } else {
+            // INIT 状态：缓存到 pending 队列
+            if let Some(queue) = self.pending_post_recv_queue.clone_recv_wr_queue(qpn) {
+                queue.lock().push_back(wr);
+                debug!("Buffered RecvWr for QP {qpn} in INIT state");
+            }
+        }
 
         Ok(())
     }
