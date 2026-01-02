@@ -41,6 +41,19 @@ void setup_ib(struct rdma_context *ctx, bool is_client, int msg_len)
 {
   printf("[DEBUG] setup_ib: Starting IB setup (is_client=%d)\n", is_client);
 
+  // Check for buffer size from environment variable
+  size_t buffer_size = msg_len;
+  char *env_buffer_size = getenv("RDMA_BUFFER_SIZE");
+  if (env_buffer_size != NULL)
+  {
+    buffer_size = atoi(env_buffer_size);
+    printf("[DEBUG] setup_ib: Using buffer size from RDMA_BUFFER_SIZE env var: %lu bytes\n", buffer_size);
+  }
+  else
+  {
+    printf("[DEBUG] setup_ib: Using default buffer size (msg_len): %lu bytes\n", buffer_size);
+  }
+
   struct ibv_device **dev_list = ibv_get_device_list(NULL);
   printf("[DEBUG] setup_ib: ibv_get_device_list returned %p\n", (void *)dev_list);
   if (!dev_list)
@@ -70,22 +83,22 @@ void setup_ib(struct rdma_context *ctx, bool is_client, int msg_len)
   if (!ctx->pd)
     die("Failed to allocate PD");
 
-  printf("[DEBUG] setup_ib: Allocating buffer (size=%lu bytes)...\n", msg_len);
-  ctx->buffer = mmap(NULL, msg_len, PROT_READ | PROT_WRITE,
+  printf("[DEBUG] setup_ib: Allocating buffer (size=%lu bytes)...\n", buffer_size);
+  ctx->buffer = mmap(NULL, buffer_size, PROT_READ | PROT_WRITE,
                      MAP_SHARED | MAP_ANONYMOUS | MAP_HUGETLB | MAP_POPULATE, -1, 0);
   if (ctx->buffer == MAP_FAILED)
   {
     printf("[DEBUG] setup_ib: mmap with MAP_HUGETLB failed, retrying without it\n");
     // Retry without MAP_HUGETLB for simulator compatibility
-    ctx->buffer = mmap(NULL, msg_len, PROT_READ | PROT_WRITE,
+    ctx->buffer = mmap(NULL, buffer_size, PROT_READ | PROT_WRITE,
                        MAP_SHARED | MAP_ANONYMOUS | MAP_POPULATE, -1, 0);
     if (ctx->buffer == MAP_FAILED)
       die("Failed to mmap buffer");
   }
   printf("[DEBUG] setup_ib: Buffer allocated at %p\n", ctx->buffer);
 
-  printf("[DEBUG] setup_ib: Registering MR (addr=%p, size=%lu)...\n", ctx->buffer, msg_len);
-  ctx->mr = ibv_reg_mr(ctx->pd, ctx->buffer, msg_len,
+  printf("[DEBUG] setup_ib: Registering MR (addr=%p, size=%lu)...\n", ctx->buffer, buffer_size);
+  ctx->mr = ibv_reg_mr(ctx->pd, ctx->buffer, buffer_size,
                        IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
                            IBV_ACCESS_REMOTE_READ);
   printf("[DEBUG] setup_ib: ibv_reg_mr returned mr=%p\n", (void *)ctx->mr);
@@ -169,11 +182,11 @@ void setup_qp(struct rdma_context *ctx, uint32_t dqpn, bool is_client)
   attr.max_rd_atomic = 1;
 
   // Client: 17.34.51.10 (0x1122330A), Server:
-  uint32_t ipv4_addr = 0x1122330A;
+  uint32_t ipv4_addr = 0x0;
   printf("[DEBUG] setup_qp: Setting GID with IPv4 address 0x%08x (is_client=%d)\n",
          ipv4_addr, is_client);
-  attr.ah_attr.grh.dgid.raw[10] = 0xFF;
-  attr.ah_attr.grh.dgid.raw[11] = 0xFF;
+  attr.ah_attr.grh.dgid.raw[10] = 0x0;
+  attr.ah_attr.grh.dgid.raw[11] = 0x0;
   attr.ah_attr.grh.dgid.raw[12] = (ipv4_addr >> 24) & 0xFF;
   attr.ah_attr.grh.dgid.raw[13] = (ipv4_addr >> 16) & 0xFF;
   attr.ah_attr.grh.dgid.raw[14] = (ipv4_addr >> 8) & 0xFF;

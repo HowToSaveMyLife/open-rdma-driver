@@ -241,7 +241,7 @@ void run_server()
       .length = 64,
       .lkey = ctx.mr->lkey};
   struct ibv_send_wr send_wr1 = {
-      .wr_id = 100,
+      .wr_id = 0,  // Match log pattern
       .sg_list = &send_sge1,
       .num_sge = 1,
       .opcode = IBV_WR_RDMA_WRITE,
@@ -252,13 +252,19 @@ void run_server()
   struct ibv_send_wr *bad_send_wr;
   if (ibv_post_send(ctx.qp, &send_wr1, &bad_send_wr) != 0)
     die("ibv_post_send #1 failed");
-  printf("[DEBUG] SERVER: Posted send RDMA_WRITE #1 (64 bytes)\n");
+  printf("[DEBUG] SERVER: Posted send RDMA_WRITE #1 (64 bytes, wr_id=0)\n");
 
-  // Second: post recv (zero-length) + post send (RDMA Write, 64 bytes)
+  // Second: post recv (zero-length) + post send (RDMA Write, 64 bytes, NO SIGNAL)
   struct ibv_recv_wr recv_wr2 = {.wr_id = 1};
   if (ibv_post_recv(ctx.qp, &recv_wr2, &bad_recv_wr) != 0)
     die("ibv_post_recv #2 failed");
   printf("[DEBUG] SERVER: Posted recv wr_id=1 (length=0)\n");
+
+  // Post recv again with same wr_id (mimic log pattern)
+  struct ibv_recv_wr recv_wr3 = {.wr_id = 1};
+  if (ibv_post_recv(ctx.qp, &recv_wr3, &bad_recv_wr) != 0)
+    die("ibv_post_recv #3 failed");
+  printf("[DEBUG] SERVER: Posted recv wr_id=1 again (length=0)\n");
 
   memset(ctx.buffer + 64, 'Y', 64);
   struct ibv_sge send_sge2 = {
@@ -266,28 +272,28 @@ void run_server()
       .length = 64,
       .lkey = ctx.mr->lkey};
   struct ibv_send_wr send_wr2 = {
-      .wr_id = 101,
+      .wr_id = 0,  // Same wr_id as first send
       .sg_list = &send_sge2,
       .num_sge = 1,
       .opcode = IBV_WR_RDMA_WRITE,
-      .send_flags = IBV_SEND_SIGNALED};
+      .send_flags = 0};  // NO IBV_SEND_SIGNALED
   send_wr2.wr.rdma.remote_addr = raddr + 64;
   send_wr2.wr.rdma.rkey = rkey;
 
   if (ibv_post_send(ctx.qp, &send_wr2, &bad_send_wr) != 0)
     die("ibv_post_send #2 failed");
-  printf("[DEBUG] SERVER: Posted send RDMA_WRITE #2 (64 bytes)\n");
+  printf("[DEBUG] SERVER: Posted send RDMA_WRITE #2 (64 bytes, NO SIGNAL, wr_id=0)\n");
 
   // Signal client to start
   handshake(client_sock);
 
-  // Poll for send completions
+  // Poll for send completions (only 1 expected, since 2nd send has no SIGNALED flag)
   printf("\n[DEBUG] SERVER: Polling for send completions...\n");
   struct ibv_wc wc[8];
   int send_completions = 0;
   int poll_count = 0;
 
-  while (send_completions < 2)
+  while (send_completions < 1)  // Only 1 send completion expected
   {
     int n = ibv_poll_cq(ctx.cq, 8, wc);
     if (n < 0)
@@ -320,7 +326,7 @@ void run_server()
     }
   }
 
-  printf("[DEBUG] SERVER: All send completions received\n");
+  printf("[DEBUG] SERVER: Send completion received (only 1, as 2nd send has no SIGNALED)\n");
 
   // Poll for recv completions (RecvRdmaWithImm)
   printf("\n[DEBUG] SERVER: Polling for recv completions...\n");
@@ -367,7 +373,7 @@ void run_server()
     }
   }
 
-  printf("\n[DEBUG] SERVER: All completions received (2 sends + 2 recvs)\n");
+  printf("\n[DEBUG] SERVER: All completions received (1 send + 2 recvs)\n");
   printf("[DEBUG] ========== SERVER COMPLETED ==========\n");
 
   handshake(client_sock);
@@ -429,8 +435,15 @@ void run_client(char *server_ip)
   // Wait for server to post receives
   handshake(sock);
 
-  // Mimic NCCL pattern: Send 2 RDMA Write with IMM operations
-  printf("\n[DEBUG] CLIENT: Sending RDMA Write with IMM operations...\n");
+  // Mimic NCCL pattern: Interleave post_recv and post_send
+  printf("\n[DEBUG] CLIENT: Starting NCCL pattern (recv + send interleaved)...\n");
+
+  // First: post recv (zero-length) + post send (RDMA Write with IMM)
+  struct ibv_recv_wr recv_wr1 = {.wr_id = 0};
+  struct ibv_recv_wr *bad_recv_wr;
+  if (ibv_post_recv(ctx.qp, &recv_wr1, &bad_recv_wr) != 0)
+    die("ibv_post_recv #1 failed");
+  printf("[DEBUG] CLIENT: Posted recv wr_id=0 (length=0)\n");
 
   // First RDMA Write with IMM (32 bytes, imm=32)
   memset(ctx.buffer, 'A', 32);
@@ -440,7 +453,7 @@ void run_client(char *server_ip)
       .lkey = ctx.mr->lkey};
 
   struct ibv_send_wr wr1 = {
-      .wr_id = 100,
+      .wr_id = 0,  // Match log pattern
       .sg_list = &sge1,
       .num_sge = 1,
       .opcode = IBV_WR_RDMA_WRITE_WITH_IMM,
@@ -450,11 +463,23 @@ void run_client(char *server_ip)
   wr1.wr.rdma.rkey = rkey;
 
   struct ibv_send_wr *bad_wr;
-  printf("[DEBUG] CLIENT: Posting RDMA_WRITE_WITH_IMM #1 (32 bytes, imm=32)\n");
+  printf("[DEBUG] CLIENT: Posting RDMA_WRITE_WITH_IMM #1 (32 bytes, imm=32, wr_id=0)\n");
   if (ibv_post_send(ctx.qp, &wr1, &bad_wr) != 0)
     die("ibv_post_send #1 failed");
 
-  // Second RDMA Write with IMM (32 bytes, imm=64)
+  // Second: post recv (zero-length) + post send (RDMA Write with IMM, NO SIGNAL)
+  struct ibv_recv_wr recv_wr2 = {.wr_id = 1};
+  if (ibv_post_recv(ctx.qp, &recv_wr2, &bad_recv_wr) != 0)
+    die("ibv_post_recv #2 failed");
+  printf("[DEBUG] CLIENT: Posted recv wr_id=1 (length=0)\n");
+
+  // Post recv again with same wr_id (mimic log pattern)
+  struct ibv_recv_wr recv_wr3 = {.wr_id = 1};
+  if (ibv_post_recv(ctx.qp, &recv_wr3, &bad_recv_wr) != 0)
+    die("ibv_post_recv #3 failed");
+  printf("[DEBUG] CLIENT: Posted recv wr_id=1 again (length=0)\n");
+
+  // Second RDMA Write with IMM (32 bytes, imm=64, NO SIGNAL)
   memset(ctx.buffer + 32, 'B', 32);
   struct ibv_sge sge2 = {
       .addr = (uint64_t)(ctx.buffer + 32),
@@ -462,28 +487,28 @@ void run_client(char *server_ip)
       .lkey = ctx.mr->lkey};
 
   struct ibv_send_wr wr2 = {
-      .wr_id = 101,
+      .wr_id = 0,  // Same wr_id as first send
       .sg_list = &sge2,
       .num_sge = 1,
       .opcode = IBV_WR_RDMA_WRITE_WITH_IMM,
-      .send_flags = IBV_SEND_SIGNALED,
+      .send_flags = 0,  // NO IBV_SEND_SIGNALED
       .imm_data = htonl(64)};
   wr2.wr.rdma.remote_addr = raddr + 64;
   wr2.wr.rdma.rkey = rkey;
 
-  printf("[DEBUG] CLIENT: Posting RDMA_WRITE_WITH_IMM #2 (32 bytes, imm=64)\n");
+  printf("[DEBUG] CLIENT: Posting RDMA_WRITE_WITH_IMM #2 (32 bytes, imm=64, NO SIGNAL, wr_id=0)\n");
   if (ibv_post_send(ctx.qp, &wr2, &bad_wr) != 0)
     die("ibv_post_send #2 failed");
 
-  // Poll for send completions
+  // Poll for send completions (only 1 expected, since 2nd send has no SIGNALED flag)
   printf("\n[DEBUG] CLIENT: Polling for send completions...\n");
-  struct ibv_wc wc[4];
-  int total_completions = 0;
+  struct ibv_wc wc[8];
+  int send_completions = 0;
   int poll_count = 0;
 
-  while (total_completions < 2)
+  while (send_completions < 1)  // Only 1 send completion expected
   {
-    int n = ibv_poll_cq(ctx.cq, 4, wc);
+    int n = ibv_poll_cq(ctx.cq, 8, wc);
     if (n < 0)
       die("ibv_poll_cq failed");
 
@@ -495,9 +520,12 @@ void run_client(char *server_ip)
         continue;
       }
 
-      printf("[DEBUG] CLIENT: Completion #%d - opcode=%d, wr_id=%lu\n",
-             total_completions + 1, wc[i].opcode, wc[i].wr_id);
-      total_completions++;
+      if (wc[i].opcode == IBV_WC_RDMA_WRITE)
+      {
+        printf("[DEBUG] CLIENT: Send completion #%d - wr_id=%lu\n",
+               send_completions + 1, wc[i].wr_id);
+        send_completions++;
+      }
     }
 
     if (n > 0)
@@ -507,11 +535,58 @@ void run_client(char *server_ip)
       usleep(1000);
       poll_count++;
       if (poll_count % 1000 == 0)
-        printf("[DEBUG] CLIENT: Still polling (count=%d)...\n", poll_count);
+        printf("[DEBUG] CLIENT: Still polling sends (count=%d)...\n", poll_count);
     }
   }
 
-  printf("\n[DEBUG] CLIENT: All send completions received\n");
+  printf("[DEBUG] CLIENT: Send completion received (only 1, as 2nd send has no SIGNALED)\n");
+
+  // Poll for recv completions (RecvRdmaWithImm)
+  printf("\n[DEBUG] CLIENT: Polling for recv completions...\n");
+  int recv_completions = 0;
+  poll_count = 0;
+
+  while (recv_completions < 2)
+  {
+    int n = ibv_poll_cq(ctx.cq, 8, wc);
+    if (n < 0)
+      die("ibv_poll_cq failed");
+
+    for (int i = 0; i < n; i++)
+    {
+      if (wc[i].status != IBV_WC_SUCCESS)
+      {
+        printf("[ERROR] WC failed: status=%d\n", wc[i].status);
+        continue;
+      }
+
+      if (wc[i].opcode == IBV_WC_RECV_RDMA_WITH_IMM)
+      {
+        printf("[DEBUG] CLIENT: Recv completion #%d - wr_id=%lu",
+               recv_completions + 1, wc[i].wr_id);
+
+        if (wc[i].wc_flags & IBV_WC_WITH_IMM)
+        {
+          printf(", imm_data=0x%x", ntohl(wc[i].imm_data));
+        }
+        printf("\n");
+
+        recv_completions++;
+      }
+    }
+
+    if (n > 0)
+      poll_count = 0;
+    else
+    {
+      usleep(1000);
+      poll_count++;
+      if (poll_count % 1000 == 0)
+        printf("[DEBUG] CLIENT: Still polling recvs (count=%d)...\n", poll_count);
+    }
+  }
+
+  printf("\n[DEBUG] CLIENT: All completions received (1 send + 2 recvs)\n");
   printf("[DEBUG] ========== CLIENT COMPLETED ==========\n");
 
   handshake(sock);

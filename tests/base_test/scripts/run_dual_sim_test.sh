@@ -67,7 +67,12 @@ RUST_LOG=${RUST_LOG:-info}
 # 先启动 server
 echo "Starting server..."
 echo "  RUST_LOG=$RUST_LOG"
-sudo env RUST_LOG="$RUST_LOG" LD_LIBRARY_PATH="$LD_LIBRARY_PATH" ./build/$TEST_PROGRAM "$@" &> $LOG_DIR/server.log &
+if [ -n "$RDMA_BUFFER_SIZE" ]; then
+    echo "  RDMA_BUFFER_SIZE=$RDMA_BUFFER_SIZE"
+    sudo env RUST_LOG="$RUST_LOG" LD_LIBRARY_PATH="$LD_LIBRARY_PATH" RDMA_BUFFER_SIZE="$RDMA_BUFFER_SIZE" ./build/$TEST_PROGRAM "$@" &> $LOG_DIR/server.log &
+else
+    sudo env RUST_LOG="$RUST_LOG" LD_LIBRARY_PATH="$LD_LIBRARY_PATH" ./build/$TEST_PROGRAM "$@" &> $LOG_DIR/server.log &
+fi
 SERVER_PID=$!
 
 echo "Server PID: $SERVER_PID (log: $LOG_DIR/server.log)"
@@ -78,7 +83,12 @@ sleep 3
 # 启动 client，连接到 localhost
 echo "Starting client..."
 echo "  RUST_LOG=$RUST_LOG"
-sudo env RUST_LOG="$RUST_LOG" LD_LIBRARY_PATH="$LD_LIBRARY_PATH" ./build/$TEST_PROGRAM "$@" 127.0.0.1 &> $LOG_DIR/client.log &
+if [ -n "$RDMA_BUFFER_SIZE" ]; then
+    echo "  RDMA_BUFFER_SIZE=$RDMA_BUFFER_SIZE"
+    sudo env RUST_LOG="$RUST_LOG" LD_LIBRARY_PATH="$LD_LIBRARY_PATH" RDMA_BUFFER_SIZE="$RDMA_BUFFER_SIZE" ./build/$TEST_PROGRAM "$@" 127.0.0.1 &> $LOG_DIR/client.log &
+else
+    sudo env RUST_LOG="$RUST_LOG" LD_LIBRARY_PATH="$LD_LIBRARY_PATH" ./build/$TEST_PROGRAM "$@" 127.0.0.1 &> $LOG_DIR/client.log &
+fi
 CLIENT_PID=$!
 
 echo "Client PID: $CLIENT_PID (log: $LOG_DIR/client.log)"
