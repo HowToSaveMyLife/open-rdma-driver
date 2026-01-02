@@ -142,19 +142,34 @@ impl AddressResolver for PhysAddrResolverLinuxX86 {
 
         let mut addr = start_addr_raw;
         for pa in &mut phy_addrs {
+            // /proc/self/pagemap is always indexed by system base page size (4KB)
+            // even when using huge pages (2MB). For page-aligned virtual addresses,
+            // pagemap returns the PFN of the corresponding physical page.
             let virt_pfn = addr / base_page_size;
             let offset = PFN_MASK_SIZE as u64 * virt_pfn;
             let _pos = file.seek(io::SeekFrom::Start(offset))?;
             file.read_exact(&mut buf)?;
             let entry = u64::from_ne_bytes(buf);
             if (entry >> PAGE_PRESENT_BIT) & 1 != 0 {
-                log::warn!("entry is {entry:x}");
                 let phys_pfn = entry & PFN_MASK;
-                let phys_addr = phys_pfn * base_page_size + start_addr_raw % base_page_size;
-                // SAFETY: Physical pages from kernel pagemap are always page-aligned
-                *pa = Some(unsafe { PageAlignedPhysAddr::new_unchecked(PhysAddr::new(phys_addr)) });
+                // pagemap returns PFN in units of base_page_size (4KB)
+                let phys_addr = phys_pfn * base_page_size;
 
-                maybe_gpu_ptr = false;
+                // Safety check: Verify physical address is valid
+                if phys_addr == 0 {
+                    log::error!(
+                        "Physical address is zero for VA 0x{:x}, PFN=0x{:x}",
+                        addr,
+                        phys_pfn
+                    );
+                    // Don't set pa, leave it as None to trigger error in caller
+                } else {
+                    // SAFETY: Physical pages from kernel pagemap are always page-aligned
+                    *pa = Some(unsafe {
+                        PageAlignedPhysAddr::new_unchecked(PhysAddr::new(phys_addr))
+                    });
+                    maybe_gpu_ptr = false;
+                }
             }
 
             addr += PAGE_SIZE;
@@ -169,6 +184,7 @@ impl AddressResolver for PhysAddrResolverLinuxX86 {
 
             addr = start_addr_raw;
             for pa in &mut phy_addrs {
+                // GPU pointers also indexed by base_page_size in pagemap
                 let virt_pfn = addr / base_page_size;
                 let offset = PFN_MASK_SIZE as u64 * virt_pfn;
                 let _pos = file.seek(io::SeekFrom::Start(offset))?;
@@ -176,9 +192,21 @@ impl AddressResolver for PhysAddrResolverLinuxX86 {
                 let entry = u64::from_ne_bytes(buf);
                 if (entry >> PAGE_PRESENT_BIT) & 1 != 0 {
                     let phys_pfn = entry & PFN_MASK;
-                    let phys_addr = phys_pfn * base_page_size + start_addr_raw % base_page_size;
-                    // SAFETY: GPU physical pages are also page-aligned
-                    *pa = Some(unsafe { PageAlignedPhysAddr::new_unchecked(PhysAddr::new(phys_addr)) });
+                    let phys_addr = phys_pfn * base_page_size;
+
+                    // Safety check: Verify GPU physical address is valid
+                    if phys_addr == 0 {
+                        log::error!(
+                            "GPU physical address is zero for VA 0x{:x}, PFN=0x{:x}",
+                            addr, phys_pfn
+                        );
+                        // Don't set pa, leave it as None to trigger error in caller
+                    } else {
+                        // SAFETY: GPU physical pages are also page-aligned
+                        *pa = Some(unsafe {
+                            PageAlignedPhysAddr::new_unchecked(PhysAddr::new(phys_addr))
+                        });
+                    }
                 }
 
                 addr += PAGE_SIZE;

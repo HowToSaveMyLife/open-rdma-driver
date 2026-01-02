@@ -241,7 +241,7 @@ impl SimpleTcpClient {
 
         let trimmed = line.trim();
 
-        log::debug!("Received request line: {}", trimmed);
+        log::trace!("Received request line: {}", trimmed);
         let request: SimpleMemRequest = serde_json::from_str(trimmed)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         Ok(request)
@@ -257,7 +257,7 @@ impl SimpleTcpClient {
         self.stream.write_all(b"\n")?;
         // TODO 应该有，但是没用
         self.stream.flush()?;
-        log::debug!(
+        log::trace!(
             "Sent response: type={}, channel={}",
             response.response_type,
             response.channel_id
@@ -314,7 +314,7 @@ impl SimpleMemoryProxyClient {
                 {
                     self.tcp_client.stream.write_all(b"\n")?;
                     self.tcp_client.stream.flush()?;
-                    log::debug!("Heartbeat sent (read timeout)");
+                    log::trace!("Heartbeat sent (read timeout)");
                     return Ok(());
                 } else {
                     // 其他错误，返回错误退出线程
@@ -324,7 +324,7 @@ impl SimpleMemoryProxyClient {
             }
         };
 
-        log::debug!("Processing request: {:?}", request.request_id);
+        log::trace!("Processing request: {:?}", request.request_id);
 
         // let request = self.tcp_client.get_request()?;
 
@@ -347,7 +347,7 @@ impl SimpleMemoryProxyClient {
 
     #[allow(unsafe_code)]
     pub(crate) fn handle_read_request(&self, req: SimpleMemRequest) -> SimpleMemResponse {
-        log::debug!(
+        log::trace!(
             "Received mem_read request: channel_id={}, address={:#x}, length={}, request_id={:?}",
             req.channel_id,
             req.address,
@@ -372,7 +372,7 @@ impl SimpleMemoryProxyClient {
                 data.push(byte);
             }
         }
-        log::debug!("Read byte at va {:?}: {:?}", vir_addr, data);
+        log::trace!("Read byte at va {:?}: {:?}", vir_addr, data);
 
         SimpleMemResponse {
             response_type: "mem_read_response".to_string(),
@@ -387,7 +387,7 @@ impl SimpleMemoryProxyClient {
 
     #[allow(unsafe_code)]
     pub(crate) fn handle_write_request(&self, req: SimpleMemRequest) {
-        log::debug!(
+        log::trace!(
             "Received mem_write request: channel_id={}, address={:#x}, length={}",
             req.channel_id,
             req.address,
