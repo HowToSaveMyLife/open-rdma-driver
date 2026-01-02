@@ -483,16 +483,21 @@ unsafe impl RdmaCtxOps for BlueRdmaCore {
                     | Completion::RdmaWrite { wr_id }
                     | Completion::RdmaRead { wr_id } => {
                         wc.wr_id = wr_id;
+                        wc.wc_flags = 0;
                     }
                     Completion::Recv { wr_id, imm } => {
                         wc.wr_id = wr_id;
                         if let Some(imm) = imm {
                             wc.__bindgen_anon_1.imm_data = imm;
+                            wc.wc_flags = ibverbs_sys::ibv_wc_flags::IBV_WC_WITH_IMM.0;
+                        } else {
+                            wc.wc_flags = 0;
                         }
                     }
                     Completion::RecvRdmaWithImm { wr_id, imm } => {
                         wc.wr_id = wr_id;
                         wc.__bindgen_anon_1.imm_data = imm;
+                        wc.wc_flags = ibverbs_sys::ibv_wc_flags::IBV_WC_WITH_IMM.0;
                     }
                 }
                 wc.opcode = c.opcode();

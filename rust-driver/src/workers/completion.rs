@@ -10,7 +10,7 @@ use crate::{
     rdma_utils::{
         msn::Msn,
         psn::Psn,
-        qp::{QpTable, QpTableShared, qpn_to_index},
+        qp::{qpn_to_index, QpTable, QpTableShared},
         types::QpAttr,
     },
     workers::{

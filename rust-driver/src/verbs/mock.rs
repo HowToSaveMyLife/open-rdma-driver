@@ -410,6 +410,10 @@ impl VerbsOps for MockDeviceCtx {
     }
 
     fn update_qp(&mut self, qpn: u32, attr: IbvQpAttr) -> crate::error::Result<()> {
+        log::info!(
+            "[MOCK DEBUG] mock update qp: {qpn}, dest_qp_ip is: {:?}",
+            attr.dest_qp_ip()
+        );
         // FIXME: use actual addr
         let dqp_ip = attr.dest_qp_ip().unwrap_or(Ipv4Addr::new(0, 0, 0, 0));
         let dqpn = attr.dest_qp_num();
@@ -492,6 +496,7 @@ impl VerbsOps for MockDeviceCtx {
     }
 
     fn post_send(&mut self, qpn: u32, wr: SendWr) -> crate::error::Result<()> {
+        info!("post send wr: {wr:?}, qpn: {qpn}");
         let ack_req = wr.send_flags() & ibverbs_sys::ibv_send_flags::IBV_SEND_SIGNALED.0 != 0;
         let to_send = match wr {
             SendWr::Rdma(x) => match x.opcode() {
@@ -548,12 +553,12 @@ impl VerbsOps for MockDeviceCtx {
             return Err(RdmaError::QpError(format!("QP {qpn} not found",)));
         }
 
-        info!("post send wr: {wr:?}, qpn: {qpn}");
-
         Ok(())
     }
 
     fn post_recv(&mut self, qpn: u32, wr: RecvWr) -> crate::error::Result<()> {
+        info!("post recv wr: {wr:?}, qpn: {qpn}");
+
         // 获取指定 QPN 的 sender
         let result = self.qp_ctx_table.map_qp_mut(qpn, |ctx| {
             if let Some(tx) = ctx.local_task_tx.as_ref() {
@@ -571,10 +576,7 @@ impl VerbsOps for MockDeviceCtx {
         });
 
         match result {
-            Some(Ok(())) => {
-                info!("post recv wr: {wr:?}, qpn: {qpn}");
-                Ok(())
-            }
+            Some(Ok(())) => Ok(()),
             Some(Err(e)) => Err(e),
             None => Err(RdmaError::QpError(format!("QP {qpn} not found"))),
         }
