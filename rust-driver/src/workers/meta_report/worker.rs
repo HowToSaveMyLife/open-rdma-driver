@@ -206,7 +206,7 @@ impl MetaHandler {
         );
         self.completion_tx
             .send(CompletionTask::AckRecv { qpn, base_psn });
-        // 这对吗？为什么recv也要负责tx重传？
+        // FIXME TODO 这对吗？为什么recv也要负责tx重传？
         self.packet_retransmit_tx
             .send(PacketRetransmitTask::Ack { qpn, psn: base_psn });
     }
