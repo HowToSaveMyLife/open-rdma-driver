@@ -28,8 +28,8 @@ void die(const char *reason);
 void setup_ib(struct rdma_context *ctx, bool is_client, int msg_len);
 void exchange_info(int sock, struct rdma_context *ctx, uint32_t *rkey,
                    uint64_t *raddr, uint32_t *dqpn);
-void run_server(int msg_len);
-void run_client(int msg_len, char *server_ip);
+void run_server(int msg_len, int num_ops);
+void run_client(int msg_len, char *server_ip, int num_ops);
 void setup_qp(struct rdma_context *ctx, uint32_t dqpn, bool is_client, int msg_len);
 
 void die(const char *reason)
@@ -104,7 +104,7 @@ void setup_ib(struct rdma_context *ctx, bool is_client, int msg_len)
          ctx->mr->lkey, ctx->mr->rkey);
 
   printf("[DEBUG] setup_ib: Creating CQ...\n");
-  ctx->cq = ibv_create_cq(ctx->ctx, 1, NULL, NULL, 0);
+  ctx->cq = ibv_create_cq(ctx->ctx, 256, NULL, NULL, 0);
   printf("[DEBUG] setup_ib: ibv_create_cq returned cq=%p\n", (void *)ctx->cq);
   if (!ctx->cq)
     die("Failed to create CQ");
@@ -112,8 +112,8 @@ void setup_ib(struct rdma_context *ctx, bool is_client, int msg_len)
   printf("[DEBUG] setup_ib: Creating QP...\n");
   struct ibv_qp_init_attr qp_attr = {.send_cq = ctx->cq,
                                      .recv_cq = ctx->cq,
-                                     .cap = {.max_send_wr = 1,
-                                             .max_recv_wr = 1,
+                                     .cap = {.max_send_wr = 128,
+                                             .max_recv_wr = 128,
                                              .max_send_sge = 1,
                                              .max_recv_sge = 1},
                                      .qp_type = IBV_QPT_RC};
@@ -147,26 +147,7 @@ void setup_qp(struct rdma_context *ctx, uint32_t dqpn, bool is_client, int msg_l
     die("Failed to transition QP to INIT");
   printf("[DEBUG] setup_qp: QP transitioned to INIT state\n");
 
-  // Post recv in INIT state for server (recv can be posted in INIT state)
-  if (!is_client)
-  {
-    printf("[DEBUG] setup_qp: Server - posting receive in INIT state...\n");
-    struct ibv_recv_wr wr = {0};
-    struct ibv_recv_wr *bad_wr;
-    struct ibv_sge sge = {
-        .addr = (uint64_t)ctx->buffer, .length = msg_len, .lkey = ctx->mr->lkey};
-    wr.sg_list = &sge;
-    wr.num_sge = 1;
-
-    printf("[DEBUG] setup_qp: Posting receive (addr=0x%lx, len=%d, lkey=0x%x)...\n",
-           sge.addr, msg_len, sge.lkey);
-    if (ibv_post_recv(ctx->qp, &wr, &bad_wr) != 0)
-    {
-      printf("[ERROR] setup_qp: ibv_post_recv failed in INIT state!\n");
-      die("ibv_post_recv failed");
-    }
-    printf("[DEBUG] setup_qp: Receive posted successfully in INIT state\n");
-  }
+  // Note: recv will be posted externally after QP is in RTS state
 
   printf("[DEBUG] setup_qp: Transitioning to RTR state (dest_qp_num=%u)...\n", dqpn);
   memset(&attr, 0, sizeof(attr));
@@ -264,9 +245,9 @@ void handshake(int sock)
   printf("[DEBUG] handshake: Handshake completed successfully\n");
 }
 
-void run_server(int msg_len)
+void run_server(int msg_len, int num_ops)
 {
-  printf("[DEBUG] run_server: ========== SERVER STARTING (msg_len=%d) ==========\n", msg_len);
+  printf("[DEBUG] run_server: ========== SERVER STARTING (msg_len=%d, num_ops=%d) ==========\n", msg_len, num_ops);
 
   struct rdma_context ctx;
   printf("[DEBUG] run_server: rdma_context allocated on stack at %p\n", (void *)&ctx);
@@ -328,55 +309,125 @@ void run_server(int msg_len)
   exchange_info(client_sock, &ctx, &rkey, &raddr, &dqpn);
   printf("[DEBUG] run_server: Info exchanged - setting up QP with dqpn=%u, raddr=%p\n", dqpn, (void *)raddr);
 
-  setup_qp(&ctx, dqpn, false, msg_len); // server: is_client=false, recv will be posted in INIT state
-  printf("[DEBUG] run_server: QP setup completed (recv already posted in INIT state)\n");
+  setup_qp(&ctx, dqpn, false, msg_len); // server: is_client=false
+  printf("[DEBUG] run_server: QP setup completed, now in RTS state\n");
 
   printf("[DEBUG] run_server: Performing handshake (ensure client QP is ready)...\n");
   handshake(client_sock);
   printf("[DEBUG] run_server: Handshake completed - both QPs are in RTS state\n");
 
-  printf("[DEBUG] run_server: Performing handshake (signal client to send WRITE_IMM)...\n");
-  handshake(client_sock);
-
-  long long cnt_valid = 0;
-  struct ibv_wc wc = {0};
-
-  printf("[DEBUG] run_server: Polling CQ for WRITE_IMM completion...\n");
-  int poll_count = 0;
-  while (ibv_poll_cq(ctx.cq, 1, &wc) < 1)
+  // Post multiple recv operations with wr_id
+  // Even index: WRITE_IMM (recv length = 0)
+  // Odd index: SEND (recv length = msg_len)
+  printf("[DEBUG] run_server: Posting %d recv operations...\n", num_ops);
+  for (int i = 0; i < num_ops; i++)
   {
-    usleep(1000);
-    poll_count++;
-    if (poll_count % 1000 == 0)
+    bool is_write_imm = (i % 2 == 0);
+    int recv_len = is_write_imm ? 0 : msg_len;
+
+    struct ibv_recv_wr wr = {0};
+    struct ibv_recv_wr *bad_wr;
+    struct ibv_sge sge = {
+        .addr = (uint64_t)ctx.buffer,
+        .length = recv_len,
+        .lkey = ctx.mr->lkey
+    };
+    wr.wr_id = i;  // Set wr_id to operation index
+    wr.sg_list = &sge;
+    wr.num_sge = 1;
+
+    printf("[DEBUG] run_server: Posting recv[%d] (%s, wr_id=%lu, addr=0x%lx, len=%d)...\n",
+           i, is_write_imm ? "WRITE_IMM" : "SEND", wr.wr_id, sge.addr, recv_len);
+    if (ibv_post_recv(ctx.qp, &wr, &bad_wr) != 0)
     {
-      printf("[DEBUG] run_server: Still polling CQ (count=%d)...\n", poll_count);
+      printf("[ERROR] run_server: ibv_post_recv[%d] failed!\n", i);
+      die("ibv_post_recv failed");
     }
   }
-  printf("[DEBUG] run_server: CQ poll completed after %d iterations\n", poll_count);
-  printf("[DEBUG] run_server: WC status=%d, opcode=%d, byte_len=%u\n",
-         wc.status, wc.opcode, wc.byte_len);
+  printf("[DEBUG] run_server: All %d recv operations posted successfully\n", num_ops);
 
-  // Check if we received the immediate data
-  if (wc.wc_flags & IBV_WC_WITH_IMM)
+  printf("[DEBUG] run_server: Performing handshake (signal client to send operations)...\n");
+  handshake(client_sock);
+
+  // Poll CQ for all completions and verify wr_id
+  printf("[DEBUG] run_server: Polling CQ for %d completions...\n", num_ops);
+  int recv_count = 0;
+  bool *wr_id_received = calloc(num_ops, sizeof(bool));
+
+  while (recv_count < num_ops)
   {
-    printf("[DEBUG] run_server: Received immediate data: 0x%x (%u)\n",
-           wc.imm_data, wc.imm_data);
-  }
-  else
-  {
-    printf("[WARNING] run_server: No immediate data received!\n");
+    struct ibv_wc wc = {0};
+    int n = ibv_poll_cq(ctx.cq, 1, &wc);
+    if (n > 0)
+    {
+      recv_count++;
+      printf("[DEBUG] run_server: Completion %d/%d - status=%d, opcode=%d, wr_id=%lu, byte_len=%u\n",
+             recv_count, num_ops, wc.status, wc.opcode, wc.wr_id, wc.byte_len);
+
+      if (wc.status != IBV_WC_SUCCESS)
+      {
+        printf("[ERROR] run_server: WC failed with status=%d\n", wc.status);
+        die("Work completion failed");
+      }
+
+      // Verify wr_id is valid
+      if (wc.wr_id >= num_ops)
+      {
+        printf("[ERROR] run_server: Invalid wr_id=%lu (expected 0-%d)\n", wc.wr_id, num_ops - 1);
+        die("Invalid wr_id");
+      }
+
+      // Check if this wr_id was already received
+      if (wr_id_received[wc.wr_id])
+      {
+        printf("[ERROR] run_server: Duplicate wr_id=%lu\n", wc.wr_id);
+        die("Duplicate wr_id");
+      }
+      wr_id_received[wc.wr_id] = true;
+
+      // Check if we received immediate data (for WRITE_IMM operations)
+      if (wc.wc_flags & IBV_WC_WITH_IMM)
+      {
+        printf("[DEBUG] run_server: Received immediate data: 0x%x (%u)\n",
+               wc.imm_data, wc.imm_data);
+      }
+    }
+    else if (n < 0)
+    {
+      die("ibv_poll_cq failed");
+    }
+    else
+    {
+      usleep(1000);
+    }
   }
 
+  printf("[DEBUG] run_server: All %d completions received\n", num_ops);
+
+  // Verify all wr_ids were received
+  for (int i = 0; i < num_ops; i++)
+  {
+    if (!wr_id_received[i])
+    {
+      printf("[ERROR] run_server: Missing completion for wr_id=%d\n", i);
+      die("Missing completion");
+    }
+  }
+  printf("[DEBUG] run_server: All wr_ids verified successfully\n");
+  free(wr_id_received);
+
+  // Count received data
+  long long cnt_valid = 0;
   printf("[DEBUG] run_server: Validating written data in buffer...\n");
   for (int i = 0; i < msg_len; i++)
   {
-    if (ctx.buffer[i] == 'w')
+    if (ctx.buffer[i] == 'w' || ctx.buffer[i] == 's')
     {
       cnt_valid++;
     }
   }
 
-  printf("received bytes count (written by WRITE_IMM): %lld\n", cnt_valid);
+  printf("received bytes count: %lld\n", cnt_valid);
   printf("[DEBUG] run_server: ========== SERVER COMPLETED ==========\n");
 
   printf("[DEBUG] run_server: Performing final handshake...\n");
@@ -386,10 +437,10 @@ void run_server(int msg_len)
   close(sock);
 }
 
-void run_client(int msg_len, char *server_ip)
+void run_client(int msg_len, char *server_ip, int num_ops)
 {
-  printf("[DEBUG] run_client: ========== CLIENT STARTING (msg_len=%d, server=%s) ==========\n",
-         msg_len, server_ip);
+  printf("[DEBUG] run_client: ========== CLIENT STARTING (msg_len=%d, server=%s, num_ops=%d) ==========\n",
+         msg_len, server_ip, num_ops);
 
   struct rdma_context ctx;
   printf("[DEBUG] run_client: rdma_context allocated on stack at %p\n", (void *)&ctx);
@@ -457,33 +508,7 @@ void run_client(int msg_len, char *server_ip)
   setup_qp(&ctx, dqpn, true, msg_len); // client: is_client=true
   printf("[DEBUG] run_client: QP setup completed\n");
 
-  printf("[DEBUG] run_client: Filling buffer with pattern 'w' (length=%d)...\n", msg_len);
-  memset(ctx.buffer, 'w', msg_len);
-  printf("[DEBUG] run_client: Buffer filled\n");
-
-  printf("[DEBUG] run_client: Preparing RDMA WRITE_IMM work request...\n");
-  struct ibv_sge sge = {
-      .addr = (uint64_t)ctx.buffer, .length = msg_len, .lkey = ctx.mr->lkey};
-  printf("[DEBUG] run_client: SGE - addr=0x%lx, len=%u, lkey=0x%x\n",
-         sge.addr, sge.length, sge.lkey);
-
-  struct ibv_send_wr wr = {.wr_id = 8,
-                           .sg_list = &sge,
-                           .num_sge = 1,
-                           .imm_data = 0xDEADBEEF, // Immediate data to send
-                           .opcode = IBV_WR_RDMA_WRITE_WITH_IMM,
-                           .send_flags = IBV_SEND_SIGNALED};
-  wr.wr.rdma.remote_addr = raddr;
-  wr.wr.rdma.rkey = rkey;
-
-  printf("[DEBUG] run_client: WRITE_IMM WR - wr_id=%lu, opcode=%d, imm_data=0x%x\n",
-         wr.wr_id, wr.opcode, wr.imm_data);
-  printf("[DEBUG] run_client: Remote - addr=0x%lx, rkey=0x%x\n",
-         wr.wr.rdma.remote_addr, wr.wr.rdma.rkey);
-
-  struct ibv_send_wr *bad_wr;
-
-  printf("[DEBUG] run_client: Performing handshake before WRITE_IMM...\n");
+  printf("[DEBUG] run_client: Performing handshake before operations...\n");
   handshake(sock);
   printf("[DEBUG] run_client: Handshake completed\n");
 
@@ -491,31 +516,138 @@ void run_client(int msg_len, char *server_ip)
   handshake(sock);
   printf("[DEBUG] run_client: Handshake completed\n");
 
-  printf("[DEBUG] run_client: Posting RDMA WRITE_IMM (qp=%p)...\n", (void *)ctx.qp);
-  int ret = ibv_post_send(ctx.qp, &wr, &bad_wr);
-  if (ret != 0)
+  // Post operations alternating between WRITE_IMM and SEND
+  printf("[DEBUG] run_client: Posting %d operations (alternating WRITE_IMM and SEND)...\n", num_ops);
+  for (int i = 0; i < num_ops; i++)
   {
-    printf("[ERROR] run_client: ibv_post_send failed with ret=%d, bad_wr=%p\n",
-           ret, (void *)bad_wr);
-    die("ibv_post_send failed");
-  }
-  printf("[DEBUG] run_client: WRITE_IMM posted successfully\n");
+    bool is_write_imm = (i % 2 == 0);  // Even index: WRITE_IMM, Odd index: SEND
 
-  printf("[DEBUG] run_client: Polling CQ for WRITE_IMM completion...\n");
-  struct ibv_wc wc;
-  int poll_count = 0;
-  while (ibv_poll_cq(ctx.cq, 1, &wc) < 1)
-  {
-    usleep(1000);
-    poll_count++;
-    if (poll_count % 1000 == 0)
+    if (is_write_imm)
     {
-      printf("[DEBUG] run_client: Still polling CQ (count=%d)...\n", poll_count);
+      // Fill buffer with 'w' for WRITE_IMM
+      printf("[DEBUG] run_client: Operation[%d] - Filling buffer with 'w' for WRITE_IMM...\n", i);
+      memset(ctx.buffer, 'w', msg_len);
+
+      struct ibv_sge sge = {
+          .addr = (uint64_t)ctx.buffer,
+          .length = msg_len,
+          .lkey = ctx.mr->lkey
+      };
+
+      struct ibv_send_wr wr = {
+          .wr_id = i,
+          .sg_list = &sge,
+          .num_sge = 1,
+          .imm_data = 0xDEAD0000 + i,  // Unique immediate data for each operation
+          .opcode = IBV_WR_RDMA_WRITE_WITH_IMM,
+          .send_flags = IBV_SEND_SIGNALED
+      };
+      wr.wr.rdma.remote_addr = raddr;
+      wr.wr.rdma.rkey = rkey;
+
+      printf("[DEBUG] run_client: Posting WRITE_IMM[%d] (wr_id=%lu, imm=0x%x)...\n",
+             i, wr.wr_id, wr.imm_data);
+
+      struct ibv_send_wr *bad_wr;
+      int ret = ibv_post_send(ctx.qp, &wr, &bad_wr);
+      if (ret != 0)
+      {
+        printf("[ERROR] run_client: ibv_post_send[%d] failed with ret=%d\n", i, ret);
+        die("ibv_post_send failed");
+      }
+    }
+    else
+    {
+      // Fill buffer with 's' for SEND
+      printf("[DEBUG] run_client: Operation[%d] - Filling buffer with 's' for SEND...\n", i);
+      memset(ctx.buffer, 's', msg_len);
+
+      struct ibv_sge sge = {
+          .addr = (uint64_t)ctx.buffer,
+          .length = msg_len,
+          .lkey = ctx.mr->lkey
+      };
+
+      struct ibv_send_wr wr = {
+          .wr_id = i,
+          .sg_list = &sge,
+          .num_sge = 1,
+          .opcode = IBV_WR_SEND,
+          .send_flags = IBV_SEND_SIGNALED
+      };
+
+      printf("[DEBUG] run_client: Posting SEND[%d] (wr_id=%lu)...\n", i, wr.wr_id);
+
+      struct ibv_send_wr *bad_wr;
+      int ret = ibv_post_send(ctx.qp, &wr, &bad_wr);
+      if (ret != 0)
+      {
+        printf("[ERROR] run_client: ibv_post_send[%d] failed with ret=%d\n", i, ret);
+        die("ibv_post_send failed");
+      }
     }
   }
-  printf("[DEBUG] run_client: CQ poll completed after %d iterations\n", poll_count);
-  printf("[DEBUG] run_client: WC - status=%d, opcode=%d, wr_id=%lu\n",
-         wc.status, wc.opcode, wc.wr_id);
+  printf("[DEBUG] run_client: All %d operations posted successfully\n", num_ops);
+
+  // Poll CQ for all completions and verify wr_id
+  printf("[DEBUG] run_client: Polling CQ for %d completions...\n", num_ops);
+  int send_count = 0;
+  bool *wr_id_received = calloc(num_ops, sizeof(bool));
+
+  while (send_count < num_ops)
+  {
+    struct ibv_wc wc = {0};
+    int n = ibv_poll_cq(ctx.cq, 1, &wc);
+    if (n > 0)
+    {
+      send_count++;
+      printf("[DEBUG] run_client: Completion %d/%d - status=%d, opcode=%d, wr_id=%lu\n",
+             send_count, num_ops, wc.status, wc.opcode, wc.wr_id);
+
+      if (wc.status != IBV_WC_SUCCESS)
+      {
+        printf("[ERROR] run_client: WC failed with status=%d\n", wc.status);
+        die("Work completion failed");
+      }
+
+      // Verify wr_id is valid
+      if (wc.wr_id >= num_ops)
+      {
+        printf("[ERROR] run_client: Invalid wr_id=%lu (expected 0-%d)\n", wc.wr_id, num_ops - 1);
+        die("Invalid wr_id");
+      }
+
+      // Check if this wr_id was already received
+      if (wr_id_received[wc.wr_id])
+      {
+        printf("[ERROR] run_client: Duplicate wr_id=%lu\n", wc.wr_id);
+        die("Duplicate wr_id");
+      }
+      wr_id_received[wc.wr_id] = true;
+    }
+    else if (n < 0)
+    {
+      die("ibv_poll_cq failed");
+    }
+    else
+    {
+      usleep(1000);
+    }
+  }
+
+  printf("[DEBUG] run_client: All %d completions received\n", num_ops);
+
+  // Verify all wr_ids were received
+  for (int i = 0; i < num_ops; i++)
+  {
+    if (!wr_id_received[i])
+    {
+      printf("[ERROR] run_client: Missing completion for wr_id=%d\n", i);
+      die("Missing completion");
+    }
+  }
+  printf("[DEBUG] run_client: All wr_ids verified successfully\n");
+  free(wr_id_received);
 
   printf("[DEBUG] run_client: ========== CLIENT COMPLETED ==========\n");
 
@@ -539,21 +671,63 @@ int main(int argc, char *argv[])
 
   if (argc == 2)
   {
+    // Server mode: ./write_imm <msg_len>
     int msg_len = atoi(argv[1]);
-    printf("[DEBUG] main: Mode=SERVER, msg_len=%d\n", msg_len);
-    run_server(msg_len);
+    int num_ops = 1;
+    printf("[DEBUG] main: Mode=SERVER, msg_len=%d, num_ops=%d\n", msg_len, num_ops);
+    run_server(msg_len, num_ops);
   }
   else if (argc == 3)
   {
-    int msg_len = atoi(argv[1]);
-    printf("[DEBUG] main: Mode=CLIENT, msg_len=%d, server_ip='%s'\n", msg_len, argv[2]);
-    run_client(msg_len, argv[2]);
+    // Check if argv[2] contains '.' (IP address) or is a number
+    if (strchr(argv[2], '.') != NULL)
+    {
+      // Client mode: ./write_imm <msg_len> <server_ip>
+      int msg_len = atoi(argv[1]);
+      char *server_ip = argv[2];
+      int num_ops = 1;
+      printf("[DEBUG] main: Mode=CLIENT, msg_len=%d, server_ip='%s', num_ops=%d\n", msg_len, server_ip, num_ops);
+      run_client(msg_len, server_ip, num_ops);
+    }
+    else
+    {
+      // Server mode: ./write_imm <msg_len> <num_ops>
+      int msg_len = atoi(argv[1]);
+      int num_ops = atoi(argv[2]);
+      printf("[DEBUG] main: Mode=SERVER, msg_len=%d, num_ops=%d\n", msg_len, num_ops);
+      run_server(msg_len, num_ops);
+    }
+  }
+  else if (argc == 4)
+  {
+    // Check if argv[3] contains '.' to determine argument order
+    if (strchr(argv[3], '.') != NULL)
+    {
+      // New format: ./write_imm <msg_len> <num_ops> <server_ip>
+      // This matches the test script pattern: server and client use same base args
+      int msg_len = atoi(argv[1]);
+      int num_ops = atoi(argv[2]);
+      char *server_ip = argv[3];
+      printf("[DEBUG] main: Mode=CLIENT, msg_len=%d, server_ip='%s', num_ops=%d\n", msg_len, server_ip, num_ops);
+      run_client(msg_len, server_ip, num_ops);
+    }
+    else
+    {
+      // Old format (backwards compatibility): ./write_imm <msg_len> <server_ip> <num_ops>
+      int msg_len = atoi(argv[1]);
+      char *server_ip = argv[2];
+      int num_ops = atoi(argv[3]);
+      printf("[DEBUG] main: Mode=CLIENT, msg_len=%d, server_ip='%s', num_ops=%d\n", msg_len, server_ip, num_ops);
+      run_client(msg_len, server_ip, num_ops);
+    }
   }
   else
   {
-    fprintf(stderr, "Usage: %s <msg_len> [server_ip]\n", argv[0]);
-    fprintf(stderr, "  Run without server_ip to start as server\n");
-    fprintf(stderr, "  Run with server_ip to connect as client and perform WRITE_IMM\n");
+    fprintf(stderr, "Usage: %s <msg_len> [num_ops]              # Server mode\n", argv[0]);
+    fprintf(stderr, "       %s <msg_len> [num_ops] <server_ip>  # Client mode (recommended)\n", argv[0]);
+    fprintf(stderr, "       %s <msg_len> <server_ip> [num_ops]  # Client mode (legacy)\n", argv[0]);
+    fprintf(stderr, "  num_ops: Number of operations to perform (default: 1)\n");
+    fprintf(stderr, "           Client alternates between WRITE_IMM and SEND\n");
     return EXIT_FAILURE;
   }
 
