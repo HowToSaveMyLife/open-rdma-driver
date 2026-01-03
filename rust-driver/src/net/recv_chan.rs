@@ -14,10 +14,13 @@ use serde::{Deserialize, Serialize};
 use crate::{
     rdma_utils::{
         qp::{qpn_to_index, QpTable},
-        types::RecvWr,
+        types::{RecvWr, SendWr, SendWrBase, SendWrRdma},
     },
-    types::VirtAddr,
+    types::{RemoteAddr, VirtAddr},
+    workers::{rdma::RdmaWriteTask, spawner::TaskTx},
+    RdmaError,
 };
+use crate::{verbs::ctx::try_match_pendings, workers::send::WorkReqOpCode::RdmaWriteWithImm};
 
 pub(crate) trait PostRecvChannel {
     type Tx: PostRecvTx;
@@ -36,7 +39,7 @@ pub(crate) trait PostRecvRx: Sized {
 }
 
 const BASE_PORT: u16 = 60000;
-const PORT_RANGE: u32 = 5535;  // 使用端口范围 60000-65534
+const PORT_RANGE: u32 = 5535; // 使用端口范围 60000-65534
 
 pub(crate) struct TcpChannel;
 
@@ -61,8 +64,16 @@ impl PostRecvTx for TcpChannelTx {
     }
 
     fn send(&mut self, wr: RecvWr) -> io::Result<()> {
+        // if (wr.length == 0) {
+        //     log::warn!("0 length recv wr, wouldn't send to peer by tcp channel");
+        //     return Ok(());
+        // }
         if self.inner.is_none() {
-            debug!("TcpChannelTx try connect {}:{}", self.addr, qpn_to_port(self.dqpn));
+            debug!(
+                "TcpChannelTx try connect {}:{}",
+                self.addr,
+                qpn_to_port(self.dqpn)
+            );
             self.inner = Some(TcpStream::connect((self.addr, qpn_to_port(self.dqpn)))?);
         }
         let stream = self.inner.as_mut().unwrap_or_else(|| unreachable!());
@@ -159,16 +170,88 @@ impl RecvWrQueueTable {
         let queue = self.inner.get_qp(qpn)?;
         queue.lock().pop_front()
     }
+
+    pub(crate) fn push_front(&self, qpn: u32, recv_wr: RecvWr) -> Result<(), RdmaError> {
+        if let Some(queue) = self.inner.get_qp(qpn) {
+            queue.lock().push_back(recv_wr);
+            Ok(())
+        } else {
+            Err(RdmaError::NotFound(format!(
+                "Receive WR queue for QP {} not found",
+                qpn
+            )))
+        }
+    }
+}
+
+// ============ Pending Send Queue Implementation ============
+
+/// Pending send queue capacity constant
+pub(crate) const PENDING_SEND_QUEUE_CAPACITY: usize = 128;
+
+/// Single QP's pending send queue
+pub(crate) type SharedPendingSendQueue = Arc<Mutex<VecDeque<SendWr>>>;
+
+/// Manages pending send queues for all QPs
+pub(crate) struct PendingSendQueueTable {
+    inner: QpTable<SharedPendingSendQueue>,
+}
+
+impl PendingSendQueueTable {
+    pub(crate) fn new() -> Self {
+        Self {
+            inner: QpTable::new(),
+        }
+    }
+
+    /// Get the pending send queue for a specific QP (for sharing with RecvWorker)
+    pub(crate) fn clone_queue(&self, qpn: u32) -> Option<SharedPendingSendQueue> {
+        self.inner.get_qp(qpn).cloned()
+    }
+
+    /// Try to push a pending send, returns false if queue is full
+    pub(crate) fn try_push(&self, qpn: u32, wr: SendWr) -> bool {
+        if let Some(queue) = self.inner.get_qp(qpn) {
+            let mut locked_queue = queue.lock();
+            if locked_queue.len() >= PENDING_SEND_QUEUE_CAPACITY {
+                return false; // Queue is full
+            }
+            locked_queue.push_back(wr);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Get current queue length (for logging/debugging)
+    pub(crate) fn len(&self, qpn: u32) -> usize {
+        self.inner.get_qp(qpn).map(|q| q.lock().len()).unwrap_or(0)
+    }
 }
 
 pub(crate) struct RecvWorker<Rx = TcpChannelRx> {
     rx: Rx,
     wr_queue: SharedRecvWrQueue,
+    pending_send_queue: SharedPendingSendQueue,
+    rdma_write_tx: TaskTx<RdmaWriteTask>,
+    qpn: u32,
 }
 
 impl<Rx: PostRecvRx + Send + 'static> RecvWorker<Rx> {
-    pub(crate) fn new(rx: Rx, wr_queue: SharedRecvWrQueue) -> Self {
-        Self { rx, wr_queue }
+    pub(crate) fn new(
+        rx: Rx,
+        wr_queue: SharedRecvWrQueue,
+        pending_send_queue: SharedPendingSendQueue,
+        rdma_write_tx: TaskTx<RdmaWriteTask>,
+        qpn: u32,
+    ) -> Self {
+        Self {
+            rx,
+            wr_queue,
+            pending_send_queue,
+            rdma_write_tx,
+            qpn,
+        }
     }
 
     // TODO: use tokio
@@ -182,8 +265,16 @@ impl<Rx: PostRecvRx + Send + 'static> RecvWorker<Rx> {
     #[allow(clippy::needless_pass_by_value)] // consume the flag
     /// Run the handler loop
     fn run(mut self) {
-        while let Ok(wr) = self.rx.recv() {
-            self.wr_queue.lock().push_back(wr);
+        while let Ok(recv_wr) = self.rx.recv() {
+            self.wr_queue.lock().push_back(recv_wr);
+
+            try_match_pendings(
+                self.qpn,
+                &self.pending_send_queue,
+                &self.wr_queue,
+                &self.rdma_write_tx,
+            )
+            .unwrap();
         }
     }
 }
@@ -205,9 +296,14 @@ mod tests {
         // 测试端口范围在有效区间内
         for qpn in [0, 1 << 8, 2 << 8, 0x1f4, 0x194, 0xFFFFFFFF] {
             let port = qpn_to_port(qpn);
-            assert!(port >= BASE_PORT && port < BASE_PORT + PORT_RANGE as u16,
-                    "Port {} for QPN 0x{:x} is out of range [{}, {})",
-                    port, qpn, BASE_PORT, BASE_PORT + PORT_RANGE as u16);
+            assert!(
+                port >= BASE_PORT && port < BASE_PORT + PORT_RANGE as u16,
+                "Port {} for QPN 0x{:x} is out of range [{}, {})",
+                port,
+                qpn,
+                BASE_PORT,
+                BASE_PORT + PORT_RANGE as u16
+            );
         }
 
         // 测试确定性：相同 QPN 总是映射到相同端口
@@ -215,10 +311,13 @@ mod tests {
         assert_eq!(qpn_to_port(qpn), qpn_to_port(qpn));
 
         // 测试不同 QPN（即使 index 相同但 key 不同）产生不同端口
-        let qpn1 = 0x1f4;  // index=1, key=0xf4
-        let qpn2 = 0x194;  // index=1, key=0x94
-        assert_ne!(qpn_to_port(qpn1), qpn_to_port(qpn2),
-                   "Different QPNs with same index should map to different ports");
+        let qpn1 = 0x1f4; // index=1, key=0xf4
+        let qpn2 = 0x194; // index=1, key=0x94
+        assert_ne!(
+            qpn_to_port(qpn1),
+            qpn_to_port(qpn2),
+            "Different QPNs with same index should map to different ports"
+        );
     }
 
     #[test]

@@ -23,8 +23,9 @@ use crate::{
         config::NetworkConfig,
         reader::NetConfigReader,
         recv_chan::{
-            post_recv_channel, PostRecvTx, PostRecvTxTable, RecvWorker, RecvWrQueueTable,
-            TcpChannel,
+            post_recv_channel, PendingSendQueueTable, PostRecvTx, PostRecvTxTable, RecvWorker,
+            RecvWrQueueTable, SharedPendingSendQueue, SharedRecvWrQueue, TcpChannel,
+            PENDING_SEND_QUEUE_CAPACITY,
         },
         simple_nic::SimpleNicController,
     },
@@ -89,6 +90,7 @@ pub(crate) struct HwDeviceCtx<H: HwDevice> {
     recv_wr_queue_table: RecvWrQueueTable,
     // TODO need to optimaze
     pending_post_recv_queue: RecvWrQueueTable,
+    pending_send_queue_table: PendingSendQueueTable,
     rdma_write_tx: TaskTx<RdmaWriteTask>,
     completion_tx: TaskTx<CompletionTask>,
     config: DeviceConfig,
@@ -218,6 +220,7 @@ where
             post_recv_tx_table: PostRecvTxTable::new(),
             recv_wr_queue_table: RecvWrQueueTable::new(),
             pending_post_recv_queue: RecvWrQueueTable::new(),
+            pending_send_queue_table: PendingSendQueueTable::new(),
             rdma_write_tx,
             completion_tx,
             config,
@@ -228,20 +231,59 @@ where
 }
 
 impl<H: HwDevice> HwDeviceCtx<H> {
-    fn send(&self, qpn: u32, mut wr: SendWrBase) -> Result<()> {
+    fn send(&self, qpn: u32, wr: SendWrBase) -> Result<()> {
         match self.recv_wr_queue_table.pop(qpn) {
-            Some(x) => {
-                if wr.length != x.length {
+            Some(recv_wr) => {
+                // Have available recv WR, process directly (fast path)
+                if wr.length != recv_wr.length {
                     return Err(RdmaError::InvalidInput(
                         "Send length does not match receive length".into(),
                     ));
                 }
-                let wr = SendWrRdma::new_from_base(wr, RemoteAddr::new(x.addr.as_u64()), x.lkey);
-                self.rdma_write(qpn, wr);
-
+                let rdma_wr = SendWrRdma::new_from_base(
+                    wr,
+                    RemoteAddr::new(recv_wr.addr.as_u64()),
+                    recv_wr.lkey,
+                );
+                self.rdma_write(qpn, rdma_wr);
                 Ok(())
             }
-            None => todo!("return rnr error"),
+            None => {
+                // No available recv WR, try to buffer (slow path)
+                if self
+                    .pending_send_queue_table
+                    .try_push(qpn, SendWr::Send(wr))
+                {
+                    debug!(
+                        "QP {}: No recv WR available, buffered SEND to pending queue (pending count: {})",
+                        qpn,
+                        self.pending_send_queue_table.len(qpn)
+                    );
+
+                    // Try to match with any queued recv WRs immediately
+                    let HwDeviceCtx::<H> {
+                        pending_send_queue_table,
+                        recv_wr_queue_table,
+                        rdma_write_tx,
+                        ..
+                    } = self;
+                    try_match_pendings(
+                        qpn,
+                        // TODO 需要消除 unwrap()
+                        &pending_send_queue_table.clone_queue(qpn).unwrap(),
+                        &recv_wr_queue_table.clone_recv_wr_queue(qpn).unwrap(),
+                        rdma_write_tx,
+                    )?;
+
+                    Ok(())
+                } else {
+                    // Queue is full
+                    Err(RdmaError::ResourceExhausted(format!(
+                        "Pending send queue for QP {} is full (capacity: {})",
+                        qpn, PENDING_SEND_QUEUE_CAPACITY
+                    )))
+                }
+            }
         }
     }
 
@@ -254,6 +296,73 @@ impl<H: HwDevice> HwDeviceCtx<H> {
         let task = RdmaWriteTask::new_write(qpn, wr);
         self.rdma_write_tx.send(task);
     }
+}
+
+// TODO 这些可以封装为一个数据结构，try_match_pendings可以变为这个结构的方法
+pub(crate) fn try_match_pendings(
+    qpn: u32,
+    pending_send_queue: &SharedPendingSendQueue,
+    recv_wr_queue: &SharedRecvWrQueue,
+    rdma_write_tx: &TaskTx<RdmaWriteTask>,
+) -> Result<()> {
+    loop {
+        let pending_send = match pending_send_queue.lock().pop_front() {
+            Some(send) => send,
+            None => break, // No more pending sends
+        };
+
+        let recv_wr = match recv_wr_queue.lock().pop_front() {
+            Some(recv) => recv,
+            None => {
+                pending_send_queue.lock().push_front(pending_send);
+                break;
+            }
+        };
+
+        // Match the operations
+        match pending_send {
+            SendWr::Rdma(rdma_wr) => {
+                // WRITE_WITH_IMM: just consume recv WR
+                assert!(rdma_wr.opcode() == send::WorkReqOpCode::RdmaWriteWithImm);
+                debug!(
+                    "QP {}: Matched pending RDMA_WRITE_WITH_IMM with queued recv WR",
+                    qpn
+                );
+                let task = RdmaWriteTask::new_write(qpn, rdma_wr);
+                rdma_write_tx.send(task);
+            }
+            SendWr::Send(send_base) => {
+                // SEND: need to match length
+                if send_base.length == recv_wr.length {
+                    let rdma_wr = SendWrRdma::new_from_base(
+                        send_base,
+                        RemoteAddr::new(recv_wr.addr.as_u64()),
+                        recv_wr.lkey,
+                    );
+                    debug!(
+                        "QP {}: Matched pending SEND (len={}) with queued recv WR",
+                        qpn, recv_wr.length
+                    );
+                    let task = RdmaWriteTask::new_write(qpn, rdma_wr);
+                    rdma_write_tx.send(task);
+                } else {
+                    // TODO 需要使得QP进入正确的错误状态
+                    panic!(
+                            "QP {}: Length mismatch between pending SEND (len={}) and recv WR (len={})，停止处理",
+                            qpn, send_base.length, recv_wr.length
+                        );
+
+                    pending_send_queue
+                        .lock()
+                        .push_front(SendWr::Send(send_base));
+                    recv_wr_queue.lock().push_front(recv_wr);
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 impl<H> VerbsOps for HwDeviceCtx<H>
@@ -458,14 +567,43 @@ where
                         "Receive WR queue for QP {qpn} not found",
                     )))?;
 
+            // Get pending send queue
+            let pending_send_queue =
+                self.pending_send_queue_table
+                    .clone_queue(qpn)
+                    .ok_or(RdmaError::NotFound(format!(
+                        "Pending send queue for QP {qpn} not found",
+                    )))?;
+
             debug!("before spawn RecvWorker");
-            RecvWorker::new(rx, wr_queue).spawn();
+            RecvWorker::new(
+                rx,
+                wr_queue,
+                pending_send_queue,
+                self.rdma_write_tx.clone(),
+                qpn,
+            )
+            .spawn();
         }
 
         Ok(())
     }
 
     fn destroy_qp(&mut self, qpn: u32) -> Result<()> {
+        // Clear pending send queue (optional warning)
+        if let Some(queue) = self.pending_send_queue_table.clone_queue(qpn) {
+            let pending_count = queue.lock().len();
+            if pending_count > 0 {
+                log::warn!(
+                    "Destroying QP {} with {} pending send WRs, they will be dropped",
+                    qpn,
+                    pending_count
+                );
+                queue.lock().clear();
+            }
+        }
+
+        // Original destroy logic
         if self.qp_manager.destroy_qp(qpn) {
             Ok(())
         } else {
@@ -492,10 +630,61 @@ where
     fn post_send(&mut self, qpn: u32, wr: SendWr) -> Result<()> {
         debug!("post_send called, qpn is {qpn}, wr is {wr:?}");
 
+        use crate::workers::send::WorkReqOpCode;
+
         match wr {
             SendWr::Rdma(wr) => {
-                self.rdma_write(qpn, wr);
-                Ok(())
+                // Check if this is RDMA_WRITE_WITH_IMM, which needs to consume a recv WR
+                if wr.opcode() == WorkReqOpCode::RdmaWriteWithImm {
+                    // WRITE_WITH_IMM needs to consume a recv WR (for completion generation)
+                    match self.recv_wr_queue_table.pop(qpn) {
+                        Some(_recv_wr) => {
+                            // Have recv WR, can proceed with WRITE_WITH_IMM
+                            debug!("QP {}: WRITE_WITH_IMM consumed recv WR", qpn);
+                            self.rdma_write(qpn, wr);
+                            Ok(())
+                        }
+                        None => {
+                            // No recv WR available, try to buffer
+                            if self
+                                .pending_send_queue_table
+                                .try_push(qpn, SendWr::Rdma(wr))
+                            {
+                                debug!(
+                                    "QP {}: No recv WR for WRITE_WITH_IMM, buffered to pending queue (count: {})",
+                                    qpn,
+                                    self.pending_send_queue_table.len(qpn)
+                                );
+
+                                // Try to match with any queued recv WRs immediately
+                                let HwDeviceCtx::<H> {
+                                    pending_send_queue_table,
+                                    recv_wr_queue_table,
+                                    rdma_write_tx,
+                                    ..
+                                } = self;
+                                try_match_pendings(
+                                    qpn,
+                                    // TODO 需要消除 unwrap()
+                                    &pending_send_queue_table.clone_queue(qpn).unwrap(),
+                                    &recv_wr_queue_table.clone_recv_wr_queue(qpn).unwrap(),
+                                    rdma_write_tx,
+                                )?;
+
+                                Ok(())
+                            } else {
+                                Err(RdmaError::ResourceExhausted(format!(
+                                    "Pending send queue for QP {} is full (capacity: {})",
+                                    qpn, PENDING_SEND_QUEUE_CAPACITY
+                                )))
+                            }
+                        }
+                    }
+                } else {
+                    // Regular RDMA_WRITE doesn't need recv WR
+                    self.rdma_write(qpn, wr);
+                    Ok(())
+                }
             }
             SendWr::Send(wr) => self.send(qpn, wr),
         }

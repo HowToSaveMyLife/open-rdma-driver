@@ -258,21 +258,21 @@ impl QueuePairMessageTracker {
         let event = self.merge.pop_recv()?;
         let completion = match event.op {
             RecvEventOp::WriteWithImm { imm } => {
-                let x = self.post_recv_queue.pop_back().expect("no posted recv wr");
+                let x = self.post_recv_queue.pop_front().expect("no posted recv wr");
                 Some(Completion::RecvRdmaWithImm {
                     wr_id: x.wr_id,
                     imm,
                 })
             }
             RecvEventOp::Recv => {
-                let x = self.post_recv_queue.pop_back().expect("no posted recv wr");
+                let x = self.post_recv_queue.pop_front().expect("no posted recv wr");
                 Some(Completion::Recv {
                     wr_id: x.wr_id,
                     imm: None,
                 })
             }
             RecvEventOp::RecvWithImm { imm } => {
-                let x = self.post_recv_queue.pop_back().expect("no posted recv wr");
+                let x = self.post_recv_queue.pop_front().expect("no posted recv wr");
                 Some(Completion::Recv {
                     wr_id: x.wr_id,
                     imm: Some(imm),
