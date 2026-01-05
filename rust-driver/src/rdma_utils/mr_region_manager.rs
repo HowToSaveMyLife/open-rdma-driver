@@ -14,26 +14,34 @@ impl MrRegionManager {
     }
 
     pub(crate) fn insert(&mut self, addr: VirtAddr, length: usize, umem_handle: &impl UmemHandler) {
-        let pin_range = self.insert_and_get_pin_range(addr, length);
-        umem_handle
-            .pin_pages(
-                VirtAddr::new(pin_range.start as u64),
-                pin_range.end - pin_range.start,
-            )
-            .unwrap();
+        let pin_range_maybe = self.insert_and_get_pin_range(addr, length);
+        if let Some(pin_range) = pin_range_maybe {
+            umem_handle
+                .pin_pages(
+                    VirtAddr::new(pin_range.start as u64),
+                    pin_range.end - pin_range.start,
+                )
+                .unwrap();
+        }
     }
 
     pub(crate) fn remove(&mut self, addr: VirtAddr, length: usize, umem_handle: &impl UmemHandler) {
-        let pin_range = self.remove_and_get_unpin_range(addr, length);
-        umem_handle
-            .unpin_pages(
-                VirtAddr::new(pin_range.start as u64),
-                pin_range.end - pin_range.start,
-            )
-            .unwrap();
+        let pin_range_maybe = self.remove_and_get_unpin_range(addr, length);
+
+        // If start >= end, the physical pages are still being used by other regions
+        // in the same page (e.g., multiple small regions within a 2MB huge page).
+        // In this case, we should not unpin the pages.
+        if let Some(pin_range) = pin_range_maybe {
+            umem_handle
+                .unpin_pages(
+                    VirtAddr::new(pin_range.start as u64),
+                    pin_range.end - pin_range.start,
+                )
+                .unwrap()
+        }
     }
 
-    fn get_pin_range(&self, start: usize, end: usize) -> Range<usize> {
+    fn get_pin_range(&self, start: usize, end: usize) -> Option<Range<usize>> {
         assert!(start < end);
 
         let start_page = phy_page_start(start);
@@ -69,10 +77,14 @@ impl MrRegionManager {
             end_page + PAGE_SIZE
         };
 
-        mlock_start..mlock_end
+        if mlock_start >= mlock_end {
+            None
+        } else {
+            Some(mlock_start..mlock_end)
+        }
     }
 
-    fn insert_and_get_pin_range(&mut self, addr: VirtAddr, length: usize) -> Range<usize> {
+    fn insert_and_get_pin_range(&mut self, addr: VirtAddr, length: usize) -> Option<Range<usize>> {
         let start = addr.as_u64() as usize;
 
         let end = start + length;
@@ -89,7 +101,11 @@ impl MrRegionManager {
         result
     }
 
-    fn remove_and_get_unpin_range(&mut self, addr: VirtAddr, length: usize) -> Range<usize> {
+    fn remove_and_get_unpin_range(
+        &mut self,
+        addr: VirtAddr,
+        length: usize,
+    ) -> Option<Range<usize>> {
         let start = addr.as_u64() as usize;
 
         let end = start + length;
@@ -105,6 +121,7 @@ impl MrRegionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::verbs::mock::MockUmemHandler;
 
     #[test]
     fn test_new_manager() {
@@ -132,7 +149,7 @@ mod tests {
 
         let addr = VirtAddr::new(0x20_0000);
         let length = PAGE_SIZE * 2;
-        let range = manager.insert_and_get_pin_range(addr, length);
+        let range = manager.insert_and_get_pin_range(addr, length).unwrap();
 
         // Verify the region was inserted
         assert_eq!(manager.0.len(), 1);
@@ -185,7 +202,7 @@ mod tests {
         // Test with no existing regions
         let start = 0x20_0000;
         let end = start + PAGE_SIZE;
-        let range = manager.get_pin_range(start, end);
+        let range = manager.get_pin_range(start, end).unwrap();
 
         // Should pin the whole page
         assert_eq!(range.start, phy_page_start(start));
@@ -199,7 +216,7 @@ mod tests {
         // Test range spanning multiple pages
         let start = 0x20_0000;
         let end = start + PAGE_SIZE * 3;
-        let range = manager.get_pin_range(start, end);
+        let range = manager.get_pin_range(start, end).unwrap();
 
         assert_eq!(range.start, phy_page_start(start));
         assert_eq!(range.end, phy_page_start(end - 1) + PAGE_SIZE);
@@ -216,7 +233,7 @@ mod tests {
         // Test range that overlaps with first region
         let start = 0x40_0000;
         let end = start + PAGE_SIZE;
-        let range = manager.get_pin_range(start, end);
+        let range = manager.get_pin_range(start, end).unwrap();
 
         // Should start from the next page after the existing region
         assert_eq!(range.start, phy_page_start(start));
@@ -234,7 +251,7 @@ mod tests {
         // Test range that spans from before first region to after second region
         let start = 0x00_0000;
         let end = 0xA0_0000;
-        let range = manager.get_pin_range(start, end);
+        let range = manager.get_pin_range(start, end).unwrap();
 
         // Should calculate range excluding existing regions
         // Start should be page-aligned
@@ -253,7 +270,7 @@ mod tests {
         let _ = manager.insert_and_get_pin_range(addr, length);
 
         // Remove it
-        let range = manager.remove_and_get_unpin_range(addr, length);
+        let range = manager.remove_and_get_unpin_range(addr, length).unwrap();
 
         // Verify it was removed
         assert_eq!(manager.0.len(), 0);
@@ -294,7 +311,7 @@ mod tests {
         // Insert region with minimal length
         let addr = VirtAddr::new(0x20_0000);
         let length = 1;
-        let range = manager.insert_and_get_pin_range(addr, length);
+        let range = manager.insert_and_get_pin_range(addr, length).unwrap();
 
         // Should still pin the whole page
         assert_eq!(range.start, phy_page_start(addr.as_u64() as usize));
@@ -311,7 +328,7 @@ mod tests {
         // Insert region exactly at page boundary
         let addr = VirtAddr::new(PAGE_SIZE as u64);
         let length = PAGE_SIZE;
-        let range = manager.insert_and_get_pin_range(addr, length);
+        let range = manager.insert_and_get_pin_range(addr, length).unwrap();
 
         assert_eq!(range.start, addr.as_u64() as usize);
         assert_eq!(range.end, (addr.as_u64() as usize) + PAGE_SIZE);
@@ -325,7 +342,7 @@ mod tests {
         // 0x21_1234 should align to 0x20_0000 (2MB boundary)
         let addr = VirtAddr::new(0x21_1234);
         let length = PAGE_SIZE;
-        let range = manager.insert_and_get_pin_range(addr, length);
+        let range = manager.insert_and_get_pin_range(addr, length).unwrap();
 
         // Since addr is at 0x21_1234 (within 2MB page starting at 0x20_0000),
         // and length is PAGE_SIZE (2MB), the region spans:
@@ -345,7 +362,7 @@ mod tests {
         // Insert a very large region (2GB)
         let addr = VirtAddr::new(0x00_0000);
         let length = PAGE_SIZE * 1024;
-        let range = manager.insert_and_get_pin_range(addr, length);
+        let range = manager.insert_and_get_pin_range(addr, length).unwrap();
 
         assert_eq!(range.start, phy_page_start(addr.as_u64() as usize));
         assert_eq!(
@@ -366,7 +383,7 @@ mod tests {
         // Test pin range that spans across gaps
         let start = 0x00_0000;
         let end = 0x180_0000;
-        let range = manager.get_pin_range(start, end);
+        let range = manager.get_pin_range(start, end).unwrap();
 
         // Should calculate range excluding existing regions
         assert_eq!(range.start, phy_page_start(start));
@@ -382,7 +399,7 @@ mod tests {
         let addr = VirtAddr::new(max_page as u64);
         let length = PAGE_SIZE;
 
-        let range = manager.insert_and_get_pin_range(addr, length);
+        let range = manager.insert_and_get_pin_range(addr, length).unwrap();
 
         assert_eq!(range.start, phy_page_start(max_page));
         assert_eq!(range.end, phy_page_start(max_page) + PAGE_SIZE);
@@ -395,7 +412,7 @@ mod tests {
         // Test with exactly page-aligned addresses (2MB)
         let start = 0x20_0000;
         let end = 0x40_0000;
-        let range = manager.get_pin_range(start, end);
+        let range = manager.get_pin_range(start, end).unwrap();
 
         assert_eq!(range.start, start);
         assert_eq!(range.end, end);
@@ -408,7 +425,7 @@ mod tests {
         // Test range within a single page (2MB)
         let start = 0x20_1000;
         let end = 0x20_2000;
-        let range = manager.get_pin_range(start, end);
+        let range = manager.get_pin_range(start, end).unwrap();
 
         assert_eq!(range.start, phy_page_start(start));
         assert_eq!(range.end, phy_page_start(start) + PAGE_SIZE);
@@ -441,17 +458,17 @@ mod tests {
 
         // Test pin range that doesn't overlap with existing regions
         // Test a range before the first region
-        let range1 = manager.get_pin_range(0x00_0000, 0x20_0000);
+        let range1 = manager.get_pin_range(0x00_0000, 0x20_0000).unwrap();
         assert_eq!(range1.start, 0x00_0000);
         assert_eq!(range1.end, 0x20_0000);
 
         // Test a range between the two regions
-        let range2 = manager.get_pin_range(0x60_0000, 0x80_0000);
+        let range2 = manager.get_pin_range(0x60_0000, 0x80_0000).unwrap();
         assert_eq!(range2.start, 0x60_0000);
         assert_eq!(range2.end, 0x80_0000);
 
         // Test a range after the second region
-        let range3 = manager.get_pin_range(0xC0_0000, 0xE0_0000);
+        let range3 = manager.get_pin_range(0xC0_0000, 0xE0_0000).unwrap();
         assert_eq!(range3.start, 0xC0_0000);
         assert_eq!(range3.end, 0xE0_0000);
     }
@@ -487,10 +504,160 @@ mod tests {
         // Test pin range in the middle
         let start = 0x60_0000;
         let end = 0x70_0000;
-        let range = manager.get_pin_range(start, end);
+        let range = manager.get_pin_range(start, end).unwrap();
 
         // Should calculate correctly with existing regions
         assert_eq!(range.start, phy_page_start(start));
         assert_eq!(range.end, phy_page_start(end - 1) + PAGE_SIZE);
+    }
+
+    #[test]
+    fn test_remove_middle_region_same_page() {
+        let mut manager = MrRegionManager::new();
+
+        // Insert three small regions within the same 2MB page
+        let page_base = 0x20_0000;
+        let _ = manager.insert_and_get_pin_range(VirtAddr::new(page_base), 0x1000);
+        let _ = manager.insert_and_get_pin_range(VirtAddr::new(page_base + 0x2000), 0x1000);
+        let _ = manager.insert_and_get_pin_range(VirtAddr::new(page_base + 0x1000), 0x1000);
+
+        assert_eq!(manager.0.len(), 3);
+
+        // Remove the middle region - should not panic
+        let range_opt = manager.remove_and_get_unpin_range(VirtAddr::new(page_base + 0x1000), 0x1000);
+
+        // The returned range should indicate that no unpinning is needed
+        // because the page is still used by regions A and C
+        // In this case, None is returned or start >= end
+        if let Some(range) = range_opt {
+            assert!(
+                range.start >= range.end,
+                "Expected start >= end when page is shared, got start={:#x}, end={:#x}",
+                range.start,
+                range.end
+            );
+        }
+
+        assert_eq!(manager.0.len(), 2);
+    }
+
+    #[test]
+    fn test_remove_all_regions_same_page() {
+        let mut manager = MrRegionManager::new();
+
+        // Insert three small regions within the same 2MB page
+        let page_base = 0x20_0000;
+        let _ = manager.insert_and_get_pin_range(VirtAddr::new(page_base), 0x1000);
+        let _ = manager.insert_and_get_pin_range(VirtAddr::new(page_base + 0x1000), 0x1000);
+        let _ = manager.insert_and_get_pin_range(VirtAddr::new(page_base + 0x2000), 0x1000);
+
+        // Remove middle region first
+        let _ = manager.remove_and_get_unpin_range(VirtAddr::new(page_base + 0x1000), 0x1000);
+
+        // Remove last region
+        let _ = manager.remove_and_get_unpin_range(VirtAddr::new(page_base + 0x2000), 0x1000);
+
+        // Remove first region - now the page should be unpinned
+        let range = manager.remove_and_get_unpin_range(VirtAddr::new(page_base), 0x1000).unwrap();
+
+        // Should return a valid range to unpin the entire page
+        assert!(range.start < range.end);
+        assert_eq!(range.start, page_base as usize);
+        assert_eq!(range.end, page_base as usize + PAGE_SIZE);
+    }
+
+    // Tests for public insert/remove methods with UmemHandler
+
+    #[test]
+    fn test_public_insert_and_remove() {
+        let mut manager = MrRegionManager::new();
+        let umem = MockUmemHandler;
+
+        // Insert a region using public method
+        let addr = VirtAddr::new(0x20_0000);
+        let length = PAGE_SIZE * 2;
+        manager.insert(addr, length, &umem);
+
+        // Verify the region was inserted
+        assert_eq!(manager.0.len(), 1);
+        assert_eq!(manager.0.get(&(addr.as_u64() as usize)), Some(&length));
+
+        // Remove the region using public method
+        manager.remove(addr, length, &umem);
+
+        // Verify it was removed
+        assert_eq!(manager.0.len(), 0);
+    }
+
+    #[test]
+    fn test_public_insert_multiple_regions() {
+        let mut manager = MrRegionManager::new();
+        let umem = MockUmemHandler;
+
+        // Insert multiple non-overlapping regions
+        manager.insert(VirtAddr::new(0x20_0000), PAGE_SIZE, &umem);
+        manager.insert(VirtAddr::new(0x40_0000), PAGE_SIZE, &umem);
+        manager.insert(VirtAddr::new(0x80_0000), PAGE_SIZE * 2, &umem);
+
+        assert_eq!(manager.0.len(), 3);
+
+        // Remove them in different order
+        manager.remove(VirtAddr::new(0x40_0000), PAGE_SIZE, &umem);
+        assert_eq!(manager.0.len(), 2);
+
+        manager.remove(VirtAddr::new(0x80_0000), PAGE_SIZE * 2, &umem);
+        assert_eq!(manager.0.len(), 1);
+
+        manager.remove(VirtAddr::new(0x20_0000), PAGE_SIZE, &umem);
+        assert_eq!(manager.0.len(), 0);
+    }
+
+    #[test]
+    fn test_public_insert_remove_same_page() {
+        let mut manager = MrRegionManager::new();
+        let umem = MockUmemHandler;
+
+        // Insert three small regions within the same 2MB page
+        let page_base = 0x20_0000;
+        manager.insert(VirtAddr::new(page_base), 0x1000, &umem);
+        manager.insert(VirtAddr::new(page_base + 0x1000), 0x1000, &umem);
+        manager.insert(VirtAddr::new(page_base + 0x2000), 0x1000, &umem);
+
+        assert_eq!(manager.0.len(), 3);
+
+        // Remove middle region first - page should still be pinned
+        manager.remove(VirtAddr::new(page_base + 0x1000), 0x1000, &umem);
+        assert_eq!(manager.0.len(), 2);
+
+        // Remove last region - page should still be pinned
+        manager.remove(VirtAddr::new(page_base + 0x2000), 0x1000, &umem);
+        assert_eq!(manager.0.len(), 1);
+
+        // Remove first region - now the page should be unpinned
+        manager.remove(VirtAddr::new(page_base), 0x1000, &umem);
+        assert_eq!(manager.0.len(), 0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_public_remove_nonexistent() {
+        let mut manager = MrRegionManager::new();
+        let umem = MockUmemHandler;
+
+        // Try to remove non-existent region - should panic
+        manager.remove(VirtAddr::new(0x20_0000), PAGE_SIZE, &umem);
+    }
+
+    #[test]
+    #[should_panic(expected = "assertion failed")]
+    fn test_public_remove_wrong_length() {
+        let mut manager = MrRegionManager::new();
+        let umem = MockUmemHandler;
+
+        // Insert a region
+        manager.insert(VirtAddr::new(0x20_0000), PAGE_SIZE, &umem);
+
+        // Try to remove with wrong length
+        manager.remove(VirtAddr::new(0x20_0000), PAGE_SIZE * 2, &umem);
     }
 }
