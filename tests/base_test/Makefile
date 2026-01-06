@@ -9,7 +9,7 @@ CFLAGS += $(EXTRA_CFLAGS)
 endif
 
 BUILD_DIR = build
-TARGETS = $(BUILD_DIR)/loopback $(BUILD_DIR)/send_recv $(BUILD_DIR)/rdma_client_server $(BUILD_DIR)/write_imm $(BUILD_DIR)/nccl_pattern_test
+TARGETS = $(BUILD_DIR)/loopback $(BUILD_DIR)/send_recv $(BUILD_DIR)/rdma_client_server $(BUILD_DIR)/write_imm $(BUILD_DIR)/write_imm_single $(BUILD_DIR)/nccl_pattern_test
 
 all: $(BUILD_DIR) $(TARGETS)
 
@@ -28,6 +28,9 @@ $(BUILD_DIR)/rdma_client_server: rdma_client_server.c | $(BUILD_DIR)
 $(BUILD_DIR)/write_imm: write_imm.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS) $(LIBS)
 
+$(BUILD_DIR)/write_imm_single: write_imm_single.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS) $(LIBS)
+
 $(BUILD_DIR)/nccl_pattern_test: nccl_pattern_test.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS) $(LIBS)
 
@@ -44,4 +47,4 @@ run_loopback: $(BUILD_DIR)/loopback
 	RUST_LOG=debug ./$(BUILD_DIR)/loopback 1
 	
 
-.PHONY: all clean loopback send_recv rdma_client_server write_imm nccl_pattern_test
+.PHONY: all clean loopback send_recv rdma_client_server write_imm write_imm_single nccl_pattern_test
