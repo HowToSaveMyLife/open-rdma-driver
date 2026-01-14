@@ -108,6 +108,9 @@ start_rtl_simulators() {
 
     echo "Current directory: $(pwd)"
 
+    # verilator 编译
+    make compile_verilator
+
     # 清空 RTL_PIDS 数组
     RTL_PIDS=()
 
