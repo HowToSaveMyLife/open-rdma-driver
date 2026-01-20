@@ -134,13 +134,9 @@ impl Iterator for IntoIterChunk {
 
     fn next(&mut self) -> Option<Self::Item> {
         let f = self.inner.next()?;
-        let builder = self.builder.set_chunk_meta(
-            self.psn,
-            self.laddr.as_u64(),
-            f.addr,
-            f.len as u32,
-            f.pos,
-        );
+        let builder =
+            self.builder
+                .set_chunk_meta(self.psn, self.laddr.as_u64(), f.addr, f.len as u32, f.pos);
         let chunk = if self.is_retry {
             builder.set_is_retry().build()
         } else {
@@ -177,7 +173,7 @@ impl Fragmenter {
 
     fn num_segments(&self) -> usize {
         if self.base_addr >= self.end_addr {
-            return 0;
+            return 1;
         }
         let first_aligned = ((self.base_addr + self.segment_size) & !(self.align - 1));
         let remaining_after_first = self.end_addr.saturating_sub(first_aligned);
@@ -201,6 +197,7 @@ impl IntoIterator for Fragmenter {
 
     fn into_iter(self) -> Self::IntoIter {
         let num_segments = self.num_segments();
+        assert!(num_segments > 0);
         let current_pos = if num_segments == 1 {
             ChunkPos::Only
         } else {
@@ -312,5 +309,19 @@ mod test {
         assert_eq!(f.into_iter().len(), 5);
         let f = Fragmenter::new(1024, 256, 0x3ff, 4096);
         assert_eq!(f.into_iter().len(), 5);
+    }
+
+    #[test]
+    fn fragmentation_zero_len() {
+        let f = Fragmenter::new(1024, 256, 0x0, 0);
+        let mut iter = f.into_iter();
+        assert!(
+            iter.next()
+                == Some(Fragment {
+                    addr: 0x0,
+                    len: 0,
+                    pos: ChunkPos::Only,
+                })
+        );
     }
 }

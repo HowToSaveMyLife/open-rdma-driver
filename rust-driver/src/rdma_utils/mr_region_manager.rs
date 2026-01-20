@@ -16,6 +16,7 @@ impl MrRegionManager {
     pub(crate) fn insert(&mut self, addr: VirtAddr, length: usize, umem_handle: &impl UmemHandler) {
         let pin_range_maybe = self.insert_and_get_pin_range(addr, length);
         if let Some(pin_range) = pin_range_maybe {
+            log::debug!("pin_range: {:?}", pin_range);
             umem_handle
                 .pin_pages(
                     VirtAddr::new(pin_range.start as u64),
@@ -524,7 +525,8 @@ mod tests {
         assert_eq!(manager.0.len(), 3);
 
         // Remove the middle region - should not panic
-        let range_opt = manager.remove_and_get_unpin_range(VirtAddr::new(page_base + 0x1000), 0x1000);
+        let range_opt =
+            manager.remove_and_get_unpin_range(VirtAddr::new(page_base + 0x1000), 0x1000);
 
         // The returned range should indicate that no unpinning is needed
         // because the page is still used by regions A and C
@@ -558,7 +560,9 @@ mod tests {
         let _ = manager.remove_and_get_unpin_range(VirtAddr::new(page_base + 0x2000), 0x1000);
 
         // Remove first region - now the page should be unpinned
-        let range = manager.remove_and_get_unpin_range(VirtAddr::new(page_base), 0x1000).unwrap();
+        let range = manager
+            .remove_and_get_unpin_range(VirtAddr::new(page_base), 0x1000)
+            .unwrap();
 
         // Should return a valid range to unpin the entire page
         assert!(range.start < range.end);

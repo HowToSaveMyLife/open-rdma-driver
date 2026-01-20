@@ -6,6 +6,7 @@ use ibverbs_sys::{
         IBV_WR_SEND_WITH_IMM,
     },
 };
+use pnet::packet::dns::Opcode;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -44,11 +45,15 @@ impl SendWr {
             (0, 0, 0)
         };
 
-        //TODO
-        #[cfg(not(feature = "mock"))]
-        {
-            if num_sge == 0 {
-                todo!("need to impl num_sge == 0")
+        // only with imm can support num_sge == 0
+        if num_sge == 0 {
+            let has_imm =
+                wr.opcode == IBV_WR_RDMA_WRITE_WITH_IMM || wr.opcode == IBV_WR_SEND_WITH_IMM;
+            if (!has_imm) {
+                return Err(RdmaError::InvalidInput(format!(
+                    "Only IBV_WR_RDMA_WRITE_WITH_IMM or IBV_WR_SEND_WITH_IMM  supported SGE == 0, got {}",
+                    wr.opcode
+                )));
             }
         }
 

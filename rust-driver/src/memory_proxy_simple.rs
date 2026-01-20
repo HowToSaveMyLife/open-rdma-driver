@@ -401,6 +401,7 @@ impl SimpleMemoryProxyClient {
             remain_len >= req.length,
             "Not enough contiguous memory for read request"
         );
+        // log::debug!("Write byte at va {vir_addr} , len is {}", req.length);
 
         let vir_addr = vir_addr.as_mut_ptr::<u8>();
 

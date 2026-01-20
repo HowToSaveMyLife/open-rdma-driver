@@ -8,7 +8,7 @@ use crate::{
     rdma_utils::{
         fragmenter::{WrChunkFragmenter, WrPacketFragmenter},
         psn::Psn,
-        qp::{num_psn, QpTable, QpTableShared, SendQueueContext, qpn_to_index},
+        qp::{num_psn, qpn_to_index, QpTable, QpTableShared, SendQueueContext},
         types::{QpAttr, SendWrRdma},
     },
     workers::{
@@ -174,13 +174,20 @@ impl RdmaWriteWorker {
     }
 
     fn write(&mut self, qpn: u32, wr: SendWrRdma) -> io::Result<()> {
-        
         let qp = self
             .qp_attr_table
             .get_qp(qpn)
             .ok_or(io::Error::from(io::ErrorKind::InvalidInput))?;
 
-        debug!("write called with sqpn={:?}, dqpn={:?}, wr={:?}", qpn, qp.dqpn, wr);
+        debug!(
+            "write called with sqpn={:?}, dqpn={:?}, wr={:?}",
+            qpn, qp.dqpn, wr
+        );
+
+        //TODO
+        if (wr.length() == 0) {
+            assert!(wr.opcode() != WorkReqOpCode::RdmaWrite);
+        }
 
         let addr = wr.raddr();
         let length = wr.length();
@@ -206,7 +213,6 @@ impl RdmaWriteWorker {
                     SendEventOp::WriteSignaled
                 }
                 WorkReqOpCode::Send | WorkReqOpCode::SendWithImm => SendEventOp::SendSignaled,
-                WorkReqOpCode::RdmaRead => SendEventOp::ReadSignaled,
                 _ => return Err(io::ErrorKind::Unsupported.into()),
             };
             let event = Event::Send(SendEvent::new(
@@ -229,11 +235,12 @@ impl RdmaWriteWorker {
         );
 
         if ack_req {
-            let fragmenter = WrPacketFragmenter::new(wr, qp_params, psn);
-            let Some(last_packet_chunk) = fragmenter.into_iter().last() else {
-                debug!("RdmaWriteWorker handle write early return");
-                return Ok(());
-            };
+            // TODO this code means what?
+            // let fragmenter = WrPacketFragmenter::new(wr, qp_params, psn);
+            // let Some(last_packet_chunk) = fragmenter.into_iter().last() else {
+            //     debug!("RdmaWriteWorker handle write early return");
+            //     return Ok(());
+            // };
             self.timeout_tx.send(AckTimeoutTask::new_ack_req(qpn));
         }
 
@@ -246,7 +253,6 @@ impl RdmaWriteWorker {
         for chunk in fragmenter {
             self.send_handle.send(chunk);
         }
-
 
         debug!("RdmaWriteWorker handle write done");
         Ok(())

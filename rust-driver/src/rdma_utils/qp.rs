@@ -108,6 +108,7 @@ pub(crate) fn num_psn(pmtu: u8, addr: u64, length: u32) -> Option<u32> {
         .checked_sub(gap)
         .unwrap_or(length_u64)
         .div_ceil(u64::from(pmtu))
+        .max(1) // 0 length still needs at least 1 psn
         .try_into()
         .ok()
 }
