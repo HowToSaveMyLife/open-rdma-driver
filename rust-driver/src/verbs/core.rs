@@ -130,7 +130,8 @@ unsafe impl RdmaCtxOps for BlueRdmaCore {
 
         #[cfg(feature = "sim")]
         {
-            let once_ctx: OnceLock<parking_lot::Mutex<HwDeviceCtx<EmulatedHwDevice>>> = OnceLock::new();
+            let once_ctx: OnceLock<parking_lot::Mutex<HwDeviceCtx<EmulatedHwDevice>>> =
+                OnceLock::new();
             let ptr = Box::into_raw(Box::new(once_ctx)).cast();
             log::info!("create sim ptr is:{:?},at pid: {}", ptr, std::process::id());
             ptr
@@ -140,7 +141,11 @@ unsafe impl RdmaCtxOps for BlueRdmaCore {
         {
             let once_ctx: OnceLock<parking_lot::Mutex<MockDeviceCtx>> = OnceLock::new();
             let ptr = Box::into_raw(Box::new(once_ctx)).cast();
-            log::info!("create mock ptr is:{:?},at pid: {}", ptr, std::process::id());
+            log::info!(
+                "create mock ptr is:{:?},at pid: {}",
+                ptr,
+                std::process::id()
+            );
             ptr
         }
     }
@@ -413,26 +418,42 @@ unsafe impl RdmaCtxOps for BlueRdmaCore {
         bad_wr: *mut *mut ibverbs_sys::ibv_send_wr,
     ) -> ::std::os::raw::c_int {
         let qp = deref_or_ret!(qp, libc::EINVAL);
-        let wr_ptr = wr; // Save original pointer for error reporting
-        let wr = deref_or_ret!(wr, libc::EINVAL);
         let context = qp.context;
         let qp_num = qp.qp_num;
         let mut bluerdma = get_device(context);
-        let send_wr = match SendWr::new(wr) {
-            Ok(wr) => wr,
-            Err(err) => {
-                error!("Invalid send WR: {err}");
-                unsafe { *bad_wr = wr_ptr };
-                return libc::EINVAL;
-            }
-        };
-        match bluerdma.post_send(qp_num, send_wr) {
-            Ok(()) => 0,
-            Err(err) => {
+        let mut count: usize = 0;
+        // Traverse the entire WR chain
+        let mut current_wr_ptr = wr;
+        while !current_wr_ptr.is_null() {
+            count += 1;
+            // SAFETY: We've checked that current_wr_ptr is not null
+            let current_wr = unsafe { &*current_wr_ptr };
+
+            // Convert current WR to internal representation
+            let send_wr = match SendWr::new(*current_wr) {
+                Ok(wr) => wr,
+                Err(err) => {
+                    error!("Invalid send WR: {err}");
+                    unsafe { *bad_wr = current_wr_ptr };
+                    return libc::EINVAL;
+                }
+            };
+
+            // Post current WR
+            if let Err(err) = bluerdma.post_send(qp_num, send_wr) {
                 error!("Failed to post send WR: {err}");
-                err.to_errno()
+                unsafe { *bad_wr = current_wr_ptr };
+                return err.to_errno();
             }
+
+            // Move to next WR in the chain
+            current_wr_ptr = current_wr.next;
         }
+
+        log::debug!("[CORE] send WR count: {count}");
+        // All WRs posted successfully
+        unsafe { *bad_wr = ptr::null_mut() };
+        0
     }
 
     #[inline]
@@ -442,23 +463,40 @@ unsafe impl RdmaCtxOps for BlueRdmaCore {
         bad_wr: *mut *mut ibverbs_sys::ibv_recv_wr,
     ) -> ::std::os::raw::c_int {
         let qp = deref_or_ret!(qp, libc::EINVAL);
-        let wr_ptr = wr; // Save original pointer for error reporting
-        let wr = deref_or_ret!(wr, libc::EINVAL);
         let context = qp.context;
         let qp_num = qp.qp_num;
         let mut bluerdma = unsafe { get_device(context) };
-        let Some(recv_wr) = RecvWr::new(wr) else {
-            error!("Invalid receive WR: only 0 or 1 SGE is supported (num_sge must be 0 or 1)");
-            unsafe { *bad_wr = wr_ptr };
-            return libc::EINVAL;
-        };
-        match bluerdma.post_recv(qp_num, recv_wr) {
-            Ok(()) => 0,
-            Err(err) => {
+        let mut count: usize = 0;
+
+        // Traverse the entire WR chain
+        let mut current_wr_ptr = wr;
+        while !current_wr_ptr.is_null() {
+            count += 1;
+            // SAFETY: We've checked that current_wr_ptr is not null
+            let current_wr = unsafe { &*current_wr_ptr };
+
+            // Convert current WR to internal representation
+            let Some(recv_wr) = RecvWr::new(*current_wr) else {
+                error!("Invalid receive WR: only 0 or 1 SGE is supported (num_sge must be 0 or 1)");
+                unsafe { *bad_wr = current_wr_ptr };
+                return libc::EINVAL;
+            };
+
+            // Post current WR
+            if let Err(err) = bluerdma.post_recv(qp_num, recv_wr) {
                 error!("Failed to post recv WR: {err}");
-                err.to_errno()
+                unsafe { *bad_wr = current_wr_ptr };
+                return err.to_errno();
             }
+
+            // Move to next WR in the chain
+            current_wr_ptr = current_wr.next;
         }
+
+        log::debug!("[CORE] recv WR count: {count}");
+        // All WRs posted successfully
+        unsafe { *bad_wr = ptr::null_mut() };
+        0
     }
 
     #[allow(
