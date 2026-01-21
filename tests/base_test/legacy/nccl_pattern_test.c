@@ -241,7 +241,7 @@ void run_server()
       .length = 64,
       .lkey = ctx.mr->lkey};
   struct ibv_send_wr send_wr1 = {
-      .wr_id = 0,  // Match log pattern
+      .wr_id = 0, // Match log pattern
       .sg_list = &send_sge1,
       .num_sge = 1,
       .opcode = IBV_WR_RDMA_WRITE,
@@ -272,11 +272,11 @@ void run_server()
       .length = 64,
       .lkey = ctx.mr->lkey};
   struct ibv_send_wr send_wr2 = {
-      .wr_id = 0,  // Same wr_id as first send
+      .wr_id = 0, // Same wr_id as first send
       .sg_list = &send_sge2,
       .num_sge = 1,
       .opcode = IBV_WR_RDMA_WRITE,
-      .send_flags = 0};  // NO IBV_SEND_SIGNALED
+      .send_flags = 0}; // NO IBV_SEND_SIGNALED
   send_wr2.wr.rdma.remote_addr = raddr + 64;
   send_wr2.wr.rdma.rkey = rkey;
 
@@ -293,7 +293,7 @@ void run_server()
   int send_completions = 0;
   int poll_count = 0;
 
-  while (send_completions < 1)  // Only 1 send completion expected
+  while (send_completions < 1) // Only 1 send completion expected
   {
     int n = ibv_poll_cq(ctx.cq, 8, wc);
     if (n < 0)
@@ -453,7 +453,7 @@ void run_client(char *server_ip)
       .lkey = ctx.mr->lkey};
 
   struct ibv_send_wr wr1 = {
-      .wr_id = 0,  // Match log pattern
+      .wr_id = 0, // Match log pattern
       .sg_list = &sge1,
       .num_sge = 1,
       .opcode = IBV_WR_RDMA_WRITE_WITH_IMM,
@@ -487,11 +487,11 @@ void run_client(char *server_ip)
       .lkey = ctx.mr->lkey};
 
   struct ibv_send_wr wr2 = {
-      .wr_id = 0,  // Same wr_id as first send
+      .wr_id = 0, // Same wr_id as first send
       .sg_list = &sge2,
       .num_sge = 1,
       .opcode = IBV_WR_RDMA_WRITE_WITH_IMM,
-      .send_flags = 0,  // NO IBV_SEND_SIGNALED
+      .send_flags = 0, // NO IBV_SEND_SIGNALED
       .imm_data = htonl(64)};
   wr2.wr.rdma.remote_addr = raddr + 64;
   wr2.wr.rdma.rkey = rkey;
@@ -506,7 +506,7 @@ void run_client(char *server_ip)
   int send_completions = 0;
   int poll_count = 0;
 
-  while (send_completions < 1)  // Only 1 send completion expected
+  while (send_completions < 1) // Only 1 send completion expected
   {
     int n = ibv_poll_cq(ctx.cq, 8, wc);
     if (n < 0)

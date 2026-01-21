@@ -17,9 +17,14 @@ fi
 TEST_PROGRAM=$1
 shift  # 移除第一个参数，剩余参数将传递给测试程序
 
+
+
 # 设置目录路径
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 DRIVER_DIR=$(cd "$SCRIPT_DIR/../../.." && pwd)
+PROGRAM_DIR=$(cd "$SCRIPT_DIR/../build/bin" && pwd)
+
+
 
 # 设置日志目录（为每个测试程序创建独立的日志目录）
 mkdir -p $SCRIPT_DIR/../log/sim/$TEST_PROGRAM
@@ -52,8 +57,8 @@ build_test_program "$SCRIPT_DIR/.."
 setup_runtime_environment
 
 # 检查测试程序是否存在
-if [ ! -f "$SCRIPT_DIR/../build/$TEST_PROGRAM" ]; then
-    echo "Error: Test program $SCRIPT_DIR/../build/$TEST_PROGRAM not found"
+if [ ! -f "$PROGRAM_DIR/$TEST_PROGRAM" ]; then
+    echo "Error: Test program $PROGRAM_DIR/$TEST_PROGRAM not found"
     exit 1
 fi
 
@@ -69,9 +74,9 @@ echo "Starting server..."
 echo "  RUST_LOG=$RUST_LOG"
 if [ -n "$RDMA_BUFFER_SIZE" ]; then
     echo "  RDMA_BUFFER_SIZE=$RDMA_BUFFER_SIZE"
-    sudo env RUST_LOG="$RUST_LOG" LD_LIBRARY_PATH="$LD_LIBRARY_PATH" RDMA_BUFFER_SIZE="$RDMA_BUFFER_SIZE" ./build/$TEST_PROGRAM "$@" &> $LOG_DIR/server.log &
+    sudo env RUST_LOG="$RUST_LOG" LD_LIBRARY_PATH="$LD_LIBRARY_PATH" RDMA_BUFFER_SIZE="$RDMA_BUFFER_SIZE" $PROGRAM_DIR/$TEST_PROGRAM "$@" &> $LOG_DIR/server.log &
 else
-    sudo env RUST_LOG="$RUST_LOG" LD_LIBRARY_PATH="$LD_LIBRARY_PATH" ./build/$TEST_PROGRAM "$@" &> $LOG_DIR/server.log &
+    sudo env RUST_LOG="$RUST_LOG" LD_LIBRARY_PATH="$LD_LIBRARY_PATH" $PROGRAM_DIR/$TEST_PROGRAM "$@" &> $LOG_DIR/server.log &
 fi
 SERVER_PID=$!
 
@@ -85,9 +90,9 @@ echo "Starting client..."
 echo "  RUST_LOG=$RUST_LOG"
 if [ -n "$RDMA_BUFFER_SIZE" ]; then
     echo "  RDMA_BUFFER_SIZE=$RDMA_BUFFER_SIZE"
-    sudo env RUST_LOG="$RUST_LOG" LD_LIBRARY_PATH="$LD_LIBRARY_PATH" RDMA_BUFFER_SIZE="$RDMA_BUFFER_SIZE" ./build/$TEST_PROGRAM "$@" 127.0.0.1 &> $LOG_DIR/client.log &
+    sudo env RUST_LOG="$RUST_LOG" LD_LIBRARY_PATH="$LD_LIBRARY_PATH" RDMA_BUFFER_SIZE="$RDMA_BUFFER_SIZE" $PROGRAM_DIR/$TEST_PROGRAM "$@" 127.0.0.1 &> $LOG_DIR/client.log &
 else
-    sudo env RUST_LOG="$RUST_LOG" LD_LIBRARY_PATH="$LD_LIBRARY_PATH" ./build/$TEST_PROGRAM "$@" 127.0.0.1 &> $LOG_DIR/client.log &
+    sudo env RUST_LOG="$RUST_LOG" LD_LIBRARY_PATH="$LD_LIBRARY_PATH" $PROGRAM_DIR/$TEST_PROGRAM "$@" 127.0.0.1 &> $LOG_DIR/client.log &
 fi
 CLIENT_PID=$!
 

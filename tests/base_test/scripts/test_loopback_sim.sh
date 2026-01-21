@@ -38,7 +38,7 @@ MSG_LEN=${1:-4096}  # 默认 4096 字节
 echo "Running loopback test with MSG_LEN=$MSG_LEN"
 
 cd $SCRIPT_DIR/..
-sudo env RUST_BACKTRACE=full RUST_LOG=info LD_LIBRARY_PATH="$LD_LIBRARY_PATH" ./build/loopback $MSG_LEN &
+sudo env RUST_BACKTRACE=full RUST_LOG=info LD_LIBRARY_PATH="$LD_LIBRARY_PATH" ./build/bin/loopback $MSG_LEN &
 LOOPBACK_PID=$!
 
 echo "Loopback test PID: $LOOPBACK_PID"
