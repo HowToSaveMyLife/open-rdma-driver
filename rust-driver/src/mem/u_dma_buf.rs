@@ -10,7 +10,7 @@ use crate::{constants::U_DMA_BUF_CLASS_PATH, types::PhysAddr};
 
 use super::{
     page::{ContiguousPages, MmapMut, PageAllocator},
-    DmaBuf, DmaBufAllocator, PageWithPhysAddr,
+    DmaBuf, DmaBufAllocator,
 };
 
 pub(crate) struct UDmaBufAllocator {

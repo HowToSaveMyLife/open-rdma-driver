@@ -76,9 +76,6 @@ pub(crate) trait AddressResolver {
     }
 }
 
-#[cfg(emulation)]
-pub(crate) type PhysAddrResolver = PhysAddrResolverEmulated;
-#[cfg(not(emulation))]
 pub(crate) type PhysAddrResolver = PhysAddrResolverLinuxX86;
 
 pub(crate) struct PhysAddrResolverLinuxX86;
@@ -198,7 +195,8 @@ impl AddressResolver for PhysAddrResolverLinuxX86 {
                     if phys_addr == 0 {
                         log::error!(
                             "GPU physical address is zero for VA 0x{:x}, PFN=0x{:x}",
-                            addr, phys_pfn
+                            addr,
+                            phys_pfn
                         );
                         // Don't set pa, leave it as None to trigger error in caller
                     } else {
@@ -220,25 +218,27 @@ impl AddressResolver for PhysAddrResolverLinuxX86 {
     }
 }
 
-pub(crate) struct PhysAddrResolverEmulated {
-    heap_start_addr: u64,
-}
+// TODO now: emulation mode is use PhysAddrResolverLinuxX86 as well
 
-impl PhysAddrResolverEmulated {
-    pub(crate) fn new(heap_start_addr: u64) -> Self {
-        Self { heap_start_addr }
-    }
-}
+// pub(crate) struct PhysAddrResolverEmulated {
+//     heap_start_addr: u64,
+// }
 
-impl AddressResolver for PhysAddrResolverEmulated {
-    fn virt_to_phys(&self, virt_addr: VirtAddr) -> io::Result<Option<PhysAddr>> {
-        let virt_addr_raw = virt_addr.as_u64();
-        debug!(
-            "virt_addr = {virt_addr_raw:x}, heap_start_addr={:x}\n",
-            self.heap_start_addr
-        );
-        Ok(virt_addr_raw
-            .checked_sub(self.heap_start_addr)
-            .map(PhysAddr::new))
-    }
-}
+// impl PhysAddrResolverEmulated {
+//     pub(crate) fn new(heap_start_addr: u64) -> Self {
+//         Self { heap_start_addr }
+//     }
+// }
+
+// impl AddressResolver for PhysAddrResolverEmulated {
+//     fn virt_to_phys(&self, virt_addr: VirtAddr) -> io::Result<Option<PhysAddr>> {
+//         let virt_addr_raw = virt_addr.as_u64();
+//         debug!(
+//             "virt_addr = {virt_addr_raw:x}, heap_start_addr={:x}\n",
+//             self.heap_start_addr
+//         );
+//         Ok(virt_addr_raw
+//             .checked_sub(self.heap_start_addr)
+//             .map(PhysAddr::new))
+//     }
+// }

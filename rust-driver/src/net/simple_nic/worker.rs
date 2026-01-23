@@ -17,7 +17,7 @@ use crate::{
     descriptors::simple_nic::{SimpleNicRxQueueDesc, SimpleNicTxQueueDesc},
     mem::{
         page::{ContiguousPages, MmapMut},
-        DmaBuf, PageWithPhysAddr,
+        DmaBuf,
     },
     ringbuf::DescRingBuffer,
     types::PhysAddr,

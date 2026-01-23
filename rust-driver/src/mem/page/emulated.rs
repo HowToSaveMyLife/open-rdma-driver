@@ -3,8 +3,8 @@ use std::{ffi::c_void, io, ops::Range};
 use crate::{
     mem::{
         pa_va_map::{self, PaVaMap},
-        virt_to_phy::{AddressResolver, PhysAddrResolverEmulated},
-        DmaBuf, DmaBufAllocator, PageWithPhysAddr, PAGE_SIZE,
+        virt_to_phy::AddressResolver,
+        DmaBuf, DmaBufAllocator, PAGE_SIZE,
     },
     types::{PhysAddr, VirtAddr},
 };
@@ -34,7 +34,7 @@ impl<const N: usize> EmulatedPageAllocator<N> {
         let ptr = unsafe {
             libc::mmap(
                 std::ptr::null_mut(),
-                size,  // 修复: 分配完整的 size 大小的内存
+                size, // 修复: 分配完整的 size 大小的内存
                 libc::PROT_READ | libc::PROT_WRITE,
                 libc::MAP_ANONYMOUS | libc::MAP_PRIVATE,
                 -1,

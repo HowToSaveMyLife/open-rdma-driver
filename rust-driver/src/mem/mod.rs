@@ -25,7 +25,7 @@ pub(crate) mod pa_va_map;
 
 use page::MmapMut;
 pub(crate) use utils::*;
-use virt_to_phy::{AddressResolver, PhysAddrResolverEmulated, PhysAddrResolverLinuxX86};
+use virt_to_phy::{AddressResolver, PhysAddrResolverLinuxX86};
 
 use crate::mem::pa_va_map::PaVaMap;
 
@@ -60,29 +60,29 @@ pub(crate) fn page_size() -> usize {
     unsafe { libc::sysconf(libc::_SC_PAGESIZE) as usize }
 }
 
-pub(crate) struct PageWithPhysAddr {
-    pub(crate) page: page::ContiguousPages<1>,
-    pub(crate) phys_addr: PhysAddr,
-}
+// pub(crate) struct PageWithPhysAddr {
+//     pub(crate) page: page::ContiguousPages<1>,
+//     pub(crate) phys_addr: PhysAddr,
+// }
 
-impl PageWithPhysAddr {
-    pub(crate) fn new(page: page::ContiguousPages<1>, phys_addr: PhysAddr) -> Self {
-        Self { page, phys_addr }
-    }
+// impl PageWithPhysAddr {
+//     pub(crate) fn new(page: page::ContiguousPages<1>, phys_addr: PhysAddr) -> Self {
+//         Self { page, phys_addr }
+//     }
 
-    pub(crate) fn alloc<A, R>(allocator: &mut A, resolver: &R) -> io::Result<Self>
-    where
-        A: page::PageAllocator<1>,
-        R: AddressResolver,
-    {
-        let page = allocator.alloc()?;
-        let phys_addr = resolver
-            .virt_to_phys(VirtAddr::new(page.addr()))?
-            .ok_or(io::Error::from(io::ErrorKind::NotFound))?;
+//     pub(crate) fn alloc<A, R>(allocator: &mut A, resolver: &R) -> io::Result<Self>
+//     where
+//         A: page::PageAllocator<1>,
+//         R: AddressResolver,
+//     {
+//         let page = allocator.alloc()?;
+//         let phys_addr = resolver
+//             .virt_to_phys(VirtAddr::new(page.addr()))?
+//             .ok_or(io::Error::from(io::ErrorKind::NotFound))?;
 
-        Ok(Self { page, phys_addr })
-    }
-}
+//         Ok(Self { page, phys_addr })
+//     }
+// }
 
 pub(crate) struct DmaBuf {
     pub(crate) buf: MmapMut,

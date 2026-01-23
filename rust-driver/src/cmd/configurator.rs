@@ -1,23 +1,25 @@
+use log::debug;
 use std::{
     io,
     net::{IpAddr, Ipv4Addr},
     sync::atomic::{fence, Ordering},
     time::Duration,
 };
-use log::debug;
 
 use ipnetwork::IpNetwork;
 use parking_lot::Mutex;
 
 use crate::{
     constants::CARD_MAC_ADDRESS,
-    csr::{cmd_req_ring, cmd_resp_ring, CmdReqRing, CmdRespRing, DeviceAdaptor, ReaderOps, WriterOps},
+    csr::{
+        cmd_req_ring, cmd_resp_ring, CmdReqRing, CmdRespRing, DeviceAdaptor, ReaderOps, WriterOps,
+    },
     descriptors::{
         cmd::{CmdQueueReqDescUpdateMrTable, CmdQueueReqDescUpdatePGT},
         CmdQueueReqDescQpManagement, CmdQueueReqDescSetNetworkParam,
         CmdQueueReqDescSetRawPacketReceiveMeta,
     },
-    mem::{page::ContiguousPages, DmaBuf, PageWithPhysAddr},
+    mem::{page::ContiguousPages, DmaBuf},
     net::config::NetworkConfig,
     ringbuf::DescRingBuffer,
 };
@@ -38,7 +40,6 @@ pub(crate) struct CommandConfigurator<Dev: DeviceAdaptor> {
 }
 
 impl<Dev: DeviceAdaptor> CommandConfigurator<Dev> {
-
     /// Creates a new command controller instance
     ///
     /// # Returns

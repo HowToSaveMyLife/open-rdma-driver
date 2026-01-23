@@ -17,7 +17,7 @@ use crate::{
     csr::{mode::Mode, DeviceAdaptor},
     mem::{
         get_num_page, page::PageAllocator, pin_pages, virt_to_phy::AddressResolver, DmaBuf,
-        DmaBufAllocator, MemoryPinner, PageWithPhysAddr, UmemHandler, PAGE_SIZE, PAGE_SIZE_BITS,
+        DmaBufAllocator, MemoryPinner, UmemHandler, PAGE_SIZE, PAGE_SIZE_BITS,
     },
     net::{
         config::NetworkConfig,

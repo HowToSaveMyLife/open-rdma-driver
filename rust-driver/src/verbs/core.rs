@@ -17,9 +17,7 @@ use crate::rdma_utils::types::{RecvWr, SendWr};
 use crate::RdmaCtxOps;
 use crate::{
     config::{ConfigLoader, DeviceConfig},
-    mem::{
-        page::EmulatedPageAllocator, virt_to_phy::PhysAddrResolverEmulated, EmulatedUmemHandler,
-    },
+    mem::{page::EmulatedPageAllocator, EmulatedUmemHandler},
     net::config::{MacAddress, NetworkConfig},
     workers::{completion::Completion, qp_timeout::AckTimeoutConfig},
 };
