@@ -158,7 +158,9 @@
         dead_code
     )
 )]
-#![allow(unused)] // FIXME: removed clippy unused
+#![allow(unused_variables, dead_code)]
+#![deny(unused_imports)]
+// #![allow(unused)]
 #![allow(clippy::todo)] // FIXME: implement all
 #![allow(clippy::missing_docs_in_private_items)]
 #![allow(clippy::as_conversions, clippy::cast_possible_truncation)]

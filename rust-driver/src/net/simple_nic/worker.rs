@@ -1,5 +1,5 @@
 use std::{
-    io::{self, Read},
+    io::{self},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -11,12 +11,12 @@ use log::error;
 
 use crate::{
     csr::{
-        simple_nic_rx_ring, simple_nic_tx_ring, DeviceAdaptor, ReaderOps, SimpleNicRxRing,
+        simple_nic_rx_ring, simple_nic_tx_ring, DeviceAdaptor, SimpleNicRxRing,
         SimpleNicTxRing, WriterOps,
     },
-    descriptors::simple_nic::{SimpleNicRxQueueDesc, SimpleNicTxQueueDesc},
+    descriptors::simple_nic::SimpleNicTxQueueDesc,
     mem::{
-        page::{ContiguousPages, MmapMut},
+        page::MmapMut,
         DmaBuf,
     },
     ringbuf::DescRingBuffer,
@@ -25,7 +25,7 @@ use crate::{
 
 use super::{
     types::{SimpleNicRxQueue, SimpleNicTxQueue},
-    FrameRx, FrameTx, SimpleNicDevice,
+    FrameRx, FrameTx,
 };
 
 pub(crate) struct SimpleNicController<Dev: DeviceAdaptor> {
@@ -129,7 +129,7 @@ impl<Dev: DeviceAdaptor> FrameTxQueue<Dev> {
 
 impl<Dev: DeviceAdaptor + Send + 'static> FrameTx for FrameTxQueue<Dev> {
     fn send(&mut self, buf: &[u8]) -> io::Result<()> {
-        let mut desc = self
+        let desc = self
             .build_desc(buf)
             .unwrap_or_else(|| unreachable!("buffer is smaller than u32::MAX"));
         while !self.inner.push(desc) {

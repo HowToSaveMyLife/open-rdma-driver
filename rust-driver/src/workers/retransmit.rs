@@ -1,15 +1,9 @@
-use std::{cmp::Ordering, collections::VecDeque, iter, thread};
+use std::collections::VecDeque;
 
 use log::debug;
 
 use crate::{
-    constants::{MAX_PSN_WINDOW, MAX_QP_CNT},
-    rdma_utils::{
-        fragmenter::WrPacketFragmenter,
-        psn::Psn,
-        qp::{qpn_to_index, QpTable},
-        types::SendWrRdma,
-    },
+    rdma_utils::{fragmenter::WrPacketFragmenter, psn::Psn, qp::QpTable, types::SendWrRdma},
     workers::{
         send::{QpParams, SendHandle, WorkReqOpCode},
         spawner::SingleThreadTaskWorker,
@@ -127,15 +121,15 @@ impl IbvSendQueue {
     }
 
     pub(crate) fn pop_until(&mut self, psn: Psn) {
-        let mut a = self.inner.partition_point(|x| x.psn < psn);
+        let a = self.inner.partition_point(|x| x.psn < psn);
         let _drop = self.inner.drain(..a.saturating_sub(1));
         self.base_psn = psn;
     }
 
     /// Find range [`psn_low`, `psn_high`)
     pub(crate) fn range(&self, psn_low: Psn, psn_high: Psn) -> Vec<SendQueueElem> {
-        let mut a = self.inner.partition_point(|x| x.psn < psn_low);
-        let mut b = self.inner.partition_point(|x| x.psn < psn_high);
+        let a = self.inner.partition_point(|x| x.psn < psn_low);
+        let b = self.inner.partition_point(|x| x.psn < psn_high);
         if (a..b).is_empty() {
             return Vec::new();
         }
@@ -177,7 +171,7 @@ mod tests {
     use super::*;
     use crate::{
         rdma_utils::types::SendWrBase,
-        workers::send::{QpParams, SendHandle},
+        workers::send::QpParams,
     };
     use std::sync::{Arc, Mutex};
 

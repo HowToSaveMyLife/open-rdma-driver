@@ -1,18 +1,16 @@
 use std::io;
 
 use log::debug;
-use parking_lot::Mutex;
 
 use crate::{
-    constants::PSN_MASK,
     rdma_utils::{
-        fragmenter::{WrChunkFragmenter, WrPacketFragmenter},
+        fragmenter::WrChunkFragmenter,
         psn::Psn,
-        qp::{num_psn, qpn_to_index, QpTable, QpTableShared, SendQueueContext},
+        qp::{num_psn, QpTable, QpTableShared, SendQueueContext},
         types::{QpAttr, SendWrRdma},
     },
     workers::{
-        completion::{Completion, CompletionTask, Event, MessageMeta, SendEvent, SendEventOp},
+        completion::{CompletionTask, Event, MessageMeta, SendEvent, SendEventOp},
         qp_timeout::AckTimeoutTask,
         retransmit::{PacketRetransmitTask, SendQueueElem},
         send::{ChunkPos, QpParams, SendHandle, WorkReqOpCode, WrChunkBuilder},
@@ -185,7 +183,7 @@ impl RdmaWriteWorker {
         );
 
         //TODO
-        if (wr.length() == 0) {
+        if wr.length() == 0 {
             assert!(wr.opcode() != WorkReqOpCode::RdmaWrite);
         }
 
@@ -265,11 +263,10 @@ mod tests {
 
     use super::*;
     use crate::{
-        net::config::MacAddress,
         rdma_utils::types::SendWrBase,
         workers::spawner::{task_channel, TaskRx},
     };
-    use std::{net::Ipv4Addr, str::FromStr, sync::Arc};
+    use std::sync::Arc;
 
     #[allow(clippy::struct_field_names)]
     struct Rxs {

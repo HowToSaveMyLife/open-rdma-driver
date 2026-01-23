@@ -2,11 +2,11 @@
 
 use std::{
     io,
-    net::{IpAddr, Ipv4Addr},
+    net::Ipv4Addr,
     str::FromStr,
 };
 
-use ipnetwork::{IpNetwork, Ipv4Network};
+use ipnetwork::Ipv4Network;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 

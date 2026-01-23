@@ -64,7 +64,7 @@ pub(crate) trait DeviceAdaptor: Clone {
 
 /// Compile-time description of a ring.
 pub(crate) trait RingSpec {
-    #[inline]
+    
     fn csr_base(&self) -> usize;
 }
 

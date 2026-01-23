@@ -6,21 +6,18 @@ use std::{
     thread,
 };
 
-use bincode::{Decode, Encode};
 use log::debug;
 use parking_lot::Mutex;
-use serde::{Deserialize, Serialize};
 
+use crate::verbs::ctx::try_match_pendings;
 use crate::{
     rdma_utils::{
-        qp::{qpn_to_index, QpTable},
-        types::{RecvWr, SendWr, SendWrBase, SendWrRdma},
+        qp::QpTable,
+        types::{RecvWr, SendWr},
     },
-    types::{RemoteAddr, VirtAddr},
     workers::{rdma::RdmaWriteTask, spawner::TaskTx},
     RdmaError,
 };
-use crate::{verbs::ctx::try_match_pendings, workers::send::WorkReqOpCode::RdmaWriteWithImm};
 
 pub(crate) trait PostRecvChannel {
     type Tx: PostRecvTx;
@@ -282,14 +279,8 @@ impl<Rx: PostRecvRx + Send + 'static> RecvWorker<Rx> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{
-        sync::{
-            atomic::{AtomicBool, Ordering},
-            Arc,
-        },
-        thread,
-        time::Duration,
-    };
+    use crate::types::VirtAddr;
+    use std::{thread, time::Duration};
 
     #[test]
     fn test_qpn_to_port() {

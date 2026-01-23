@@ -1,11 +1,7 @@
-use std::{ffi::c_void, io, ops::Range};
+use std::io;
 
 use crate::{
-    mem::{
-        pa_va_map::{self, PaVaMap},
-        virt_to_phy::AddressResolver,
-        DmaBuf, DmaBufAllocator, PAGE_SIZE,
-    },
+    mem::{pa_va_map::PaVaMap, DmaBuf, DmaBufAllocator, PAGE_SIZE},
     types::{PhysAddr, VirtAddr},
 };
 
@@ -93,17 +89,17 @@ fn test_libc_behave() {
             0,
         );
 
-        let result = unsafe { libc::mlock(ptr, PAGE_SIZE) };
+        let result = libc::mlock(ptr, PAGE_SIZE);
 
         println!("result is {}", result);
-        let result = unsafe { libc::mlock(ptr, PAGE_SIZE) };
+        let result = libc::mlock(ptr, PAGE_SIZE);
 
         println!("result is {}", result);
 
-        let result = unsafe { libc::munlock(ptr as *const std::ffi::c_void, PAGE_SIZE) };
+        let result = libc::munlock(ptr as *const std::ffi::c_void, PAGE_SIZE);
 
         println!("result is {}", result);
-        let result = unsafe { libc::munlock(ptr as *const std::ffi::c_void, PAGE_SIZE) };
+        let result = libc::munlock(ptr as *const std::ffi::c_void, PAGE_SIZE);
 
         println!("result is {}", result);
         assert_ne!(ptr, libc::MAP_FAILED);

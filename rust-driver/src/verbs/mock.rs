@@ -11,7 +11,7 @@ use core::panic;
 use std::{
     collections::{HashMap, VecDeque},
     fmt,
-    io::{self, BufReader, Read, Write},
+    io::{self, BufReader, Write},
     iter,
     net::{Ipv4Addr, TcpListener, TcpStream},
     ptr,
@@ -25,7 +25,7 @@ use std::{
 
 use crate::{
     csr::DeviceAdaptor,
-    error::{RdmaError, Result},
+    error::RdmaError,
     rdma_utils::{
         pagemaps::check_addr_is_anon_hugepage,
         pd::PdTable,
@@ -39,9 +39,7 @@ use crate::{
 };
 
 use bincode::{Decode, Encode};
-use bitvec::store::BitStore;
 use log::{debug, error, info, warn};
-use pagemap::MapsEntry;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
@@ -868,7 +866,7 @@ impl Inner {
     fn new(ip: Ipv4Addr, qpn: u32) -> Self {
         log::info!("device binding to {}:{}", ip, Self::get_port(qpn));
         let rx_chan = TcpListener::bind((ip, Self::get_port(qpn))).expect("failed to bind to addr");
-        rx_chan.set_nonblocking(true);
+        rx_chan.set_nonblocking(true).unwrap();
         Self {
             listener: Mutex::new(rx_chan),
             rx_chan: Mutex::default(),
@@ -907,7 +905,7 @@ impl Inner {
             let listener = self.listener.lock();
             match listener.accept() {
                 Ok((stream, _)) => {
-                    stream.set_read_timeout(Some(Duration::from_millis(1)));
+                    let _ = stream.set_read_timeout(Some(Duration::from_millis(1)));
                     _ = self.rx_chan.lock().replace(BufReader::new(stream));
                 }
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
@@ -949,11 +947,11 @@ mod tests {
     fn test_tcp_channel() {
         let qpn0 = 10;
         let qpn1 = 11;
-        let mut server = Inner::new(Ipv4Addr::LOCALHOST, qpn0);
+        let server = Inner::new(Ipv4Addr::LOCALHOST, qpn0);
         server.connect(Ipv4Addr::LOCALHOST, qpn1);
 
         thread::spawn(move || {
-            let mut client = Inner::new(Ipv4Addr::LOCALHOST, qpn1);
+            let client = Inner::new(Ipv4Addr::LOCALHOST, qpn1);
             client.connect(Ipv4Addr::LOCALHOST, qpn0);
             let msg = TestMessage {
                 id: 1,
@@ -1021,7 +1019,7 @@ mod tests {
             RemoteAddr::new(buf1.as_ptr() as u64),
             buf1.len() as u32,
         );
-        dev0.dev.post_send(dev0.qpn, wr.into());
+        dev0.dev.post_send(dev0.qpn, wr.into()).unwrap();
         thread::sleep(Duration::from_millis(10));
         assert!(buf1.iter().all(|x| *x == 1));
     }
@@ -1058,7 +1056,7 @@ mod tests {
             RemoteAddr::new(buf1.as_ptr() as u64),
             buf1.len() as u32,
         );
-        dev0.dev.post_send(dev0.qpn, wr.into());
+        dev0.dev.post_send(dev0.qpn, wr.into()).unwrap();
         thread::sleep(Duration::from_millis(10));
         assert!(buf1.iter().all(|x| *x == 1));
         assert_eq!(dev0.dev.poll_cq(dev0.cq, 1).len(), 1);
@@ -1104,7 +1102,7 @@ mod tests {
                 RemoteAddr::new(buf1.as_ptr() as u64),
                 buf1.len() as u32,
             );
-            dev0.dev.post_send(dev0.qpn, wr.into());
+            dev0.dev.post_send(dev0.qpn, wr.into()).unwrap();
         }
         thread::sleep(Duration::from_millis(10));
         assert!(buf1.iter().all(|x| *x == 1));
@@ -1139,7 +1137,7 @@ mod tests {
             RemoteAddr::new(buf1.as_ptr() as u64),
             buf1.len() as u32,
         );
-        dev0.dev.post_send(dev0.qpn, wr.into());
+        dev0.dev.post_send(dev0.qpn, wr.into()).unwrap();
         thread::sleep(Duration::from_millis(10));
         assert!(buf0.iter().all(|x| *x == 1));
     }
@@ -1167,7 +1165,7 @@ mod tests {
             RemoteAddr::new(buf1.as_ptr() as u64),
             buf1.len() as u32,
         );
-        dev0.dev.post_send(dev0.qpn, wr.into());
+        dev0.dev.post_send(dev0.qpn, wr.into()).unwrap();
         thread::sleep(Duration::from_millis(10));
         assert!(buf0.iter().all(|x| *x == 1));
         assert_eq!(dev0.dev.poll_cq(dev0.cq, 1).len(), 1);
@@ -1190,7 +1188,7 @@ mod tests {
             length: buf1.len() as u32,
             lkey: 0,
         };
-        dev1.dev.post_recv(dev1.qpn, recv_wr);
+        dev1.dev.post_recv(dev1.qpn, recv_wr).unwrap();
 
         let wr = SendWrBase::new(
             0,
@@ -1201,7 +1199,7 @@ mod tests {
             0,
             WorkReqOpCode::Send,
         );
-        dev0.dev.post_send(dev0.qpn, wr.into());
+        dev0.dev.post_send(dev0.qpn, wr.into()).unwrap();
         thread::sleep(Duration::from_millis(10));
         assert!(buf1.iter().all(|x| *x == 1));
         assert_eq!(dev1.dev.poll_cq(dev1.cq, 1).len(), 1);
@@ -1224,7 +1222,7 @@ mod tests {
             length: buf1.len() as u32,
             lkey: 0,
         };
-        dev1.dev.post_recv(dev1.qpn, recv_wr);
+        dev1.dev.post_recv(dev1.qpn, recv_wr).unwrap();
 
         let wr = SendWrBase::new(
             0,
@@ -1235,7 +1233,7 @@ mod tests {
             0,
             WorkReqOpCode::Send,
         );
-        dev0.dev.post_send(dev0.qpn, wr.into());
+        dev0.dev.post_send(dev0.qpn, wr.into()).unwrap();
         thread::sleep(Duration::from_millis(10));
         assert!(buf1.iter().all(|x| *x == 1));
         assert_eq!(dev0.dev.poll_cq(dev0.cq, 1).len(), 1);
@@ -1263,7 +1261,7 @@ mod tests {
                 length: buf1.len() as u32,
                 lkey: 0,
             };
-            dev1.dev.post_recv(dev1.qpn, recv_wr);
+            dev1.dev.post_recv(dev1.qpn, recv_wr).unwrap();
         }
 
         for _ in 0..NUM_SEND_RECV {
@@ -1276,7 +1274,7 @@ mod tests {
                 0,
                 WorkReqOpCode::Send,
             );
-            dev0.dev.post_send(dev0.qpn, wr.into());
+            dev0.dev.post_send(dev0.qpn, wr.into()).unwrap();
         }
         thread::sleep(Duration::from_millis(10));
         assert!(buf1.iter().all(|x| *x == 1));

@@ -19,14 +19,9 @@ mod basic;
 mod tests;
 
 // Re-export basic address types
-pub(crate) use basic::{CsrOffset, PhysAddr, RemoteAddr, VirtAddr};
+pub(crate) use basic::{PhysAddr, RemoteAddr, VirtAddr};
 
 // Re-export aligned address types and type aliases
-pub(crate) use aligned::{
-    Aligned4KPhysAddr, Aligned4KVirtAddr, AlignedPhysAddr, AlignedVirtAddr,
-    CacheAlignedPhysAddr, CacheAlignedVirtAddr, GigaPageAlignedPhysAddr,
-    GigaPageAlignedVirtAddr, HugePageAlignedPhysAddr, HugePageAlignedVirtAddr,
-};
 
 // Re-export page-aligned types (feature-dependent)
 #[cfg(feature = "page_size_4k")]

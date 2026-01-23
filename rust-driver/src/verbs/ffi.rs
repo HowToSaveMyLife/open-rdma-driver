@@ -1,15 +1,21 @@
-use std::net::Ipv4Addr;
-
-use crate::verbs::dev::PciHwDevice;
 use parking_lot::Mutex;
 use parking_lot::{lock_api::MutexGuard, RawMutex};
 
-use super::{
-    ctx::{HwDeviceCtx, VerbsOps},
-    dev::EmulatedHwDevice,
-    mock::MockDeviceCtx,
-};
-use std::sync::{LazyLock, OnceLock};
+#[cfg(feature = "hw")]
+use crate::verbs::dev::PciHwDevice;
+
+#[cfg(feature = "sim")]
+use crate::verbs::dev::EmulatedHwDevice;
+
+#[cfg(feature = "mock")]
+use crate::verbs::mock::MockDeviceCtx;
+
+#[cfg(any(feature = "hw", feature = "sim"))]
+use super::ctx::HwDeviceCtx;
+
+use super::ctx::VerbsOps;
+
+use std::sync::OnceLock;
 
 /// RDMA context operations for Blue-RDMA driver.
 ///

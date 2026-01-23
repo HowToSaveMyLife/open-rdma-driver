@@ -111,7 +111,6 @@ impl RdmaOpCode {
             | RdmaOpCode::RdmaWriteOnly
             | RdmaOpCode::RdmaWriteOnlyWithImmediate
             | RdmaOpCode::RdmaReadResponseOnly
-            | RdmaOpCode::SendOnlyWithImmediate
             | RdmaOpCode::SendOnlyWithInvalidate => Some(PacketPos::Only),
             RdmaOpCode::RdmaReadRequest
             | RdmaOpCode::Acknowledge

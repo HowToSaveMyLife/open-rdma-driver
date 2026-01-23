@@ -1,12 +1,9 @@
 use log::debug;
 use std::{
     io,
-    net::{IpAddr, Ipv4Addr},
-    sync::atomic::{fence, Ordering},
-    time::Duration,
+    net::Ipv4Addr,
 };
 
-use ipnetwork::IpNetwork;
 use parking_lot::Mutex;
 
 use crate::{
@@ -19,7 +16,7 @@ use crate::{
         CmdQueueReqDescQpManagement, CmdQueueReqDescSetNetworkParam,
         CmdQueueReqDescSetRawPacketReceiveMeta,
     },
-    mem::{page::ContiguousPages, DmaBuf},
+    mem::DmaBuf,
     net::config::NetworkConfig,
     ringbuf::DescRingBuffer,
 };

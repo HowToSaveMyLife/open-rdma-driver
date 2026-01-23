@@ -1,13 +1,10 @@
-use std::io;
-
 use crate::{
     descriptors::{
         CmdQueueReqDescQpManagement, CmdQueueReqDescSetNetworkParam,
         CmdQueueReqDescSetRawPacketReceiveMeta, CmdQueueReqDescUpdateMrTable,
-        CmdQueueReqDescUpdatePGT, CmdQueueRespDescOnlyCommonHeader,
+        CmdQueueReqDescUpdatePGT,
     },
     mem::page::ContiguousPages,
-    net::config::NetworkConfig,
     ringbuf::{DescDeserialize, DescRingBuffer},
     types::{PhysAddr, VirtAddr},
 };

@@ -1,5 +1,5 @@
 use crate::{
-    constants::{PSN_MASK, WR_CHUNK_SIZE},
+    constants::WR_CHUNK_SIZE,
     types::VirtAddr,
     workers::send::{ChunkPos, QpParams, WithIbvParams, WrChunk, WrChunkBuilder},
 };
@@ -175,7 +175,7 @@ impl Fragmenter {
         if self.base_addr >= self.end_addr {
             return 1;
         }
-        let first_aligned = ((self.base_addr + self.segment_size) & !(self.align - 1));
+        let first_aligned = (self.base_addr + self.segment_size) & !(self.align - 1);
         let remaining_after_first = self.end_addr.saturating_sub(first_aligned);
         remaining_after_first.div_ceil(self.segment_size) as usize + 1
     }

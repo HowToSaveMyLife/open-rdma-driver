@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{net::config::NetworkConfig, workers::qp_timeout::AckTimeoutConfig};
+use crate::workers::qp_timeout::AckTimeoutConfig;
 
 use log::warn;
 

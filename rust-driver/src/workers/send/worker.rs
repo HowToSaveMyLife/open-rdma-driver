@@ -1,12 +1,11 @@
-use std::{io, iter, sync::Arc, time::Duration};
+use std::{iter, sync::Arc};
 
-use crossbeam_deque::{Injector, Steal, Stealer, Worker};
-use log::error;
+use crossbeam_deque::{Steal, Stealer};
 
 use crate::{
     descriptors::{SendQueueReqDescSeg0, SendQueueReqDescSeg1},
     csr::{DeviceAdaptor, SendRing, WriterOps},
-    workers::spawner::{SingleThreadPollingWorker, SingleThreadTaskWorker},
+    workers::spawner::SingleThreadPollingWorker,
 };
 
 use super::{

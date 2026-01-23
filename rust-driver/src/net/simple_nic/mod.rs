@@ -11,15 +11,9 @@ mod tests;
 
 pub(crate) use worker::SimpleNicController;
 
-use std::{
-    io::{self},
-    sync::{atomic::AtomicBool, Arc},
-};
+use std::{io, sync::Arc};
 
 use ipnetwork::IpNetwork;
-use worker::SimpleNicWorker;
-
-use crate::net::tap::TapDevice;
 
 #[allow(clippy::module_name_repetitions)]
 /// Configuration for the simple NIC device

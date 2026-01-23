@@ -1,20 +1,15 @@
-use std::{
-    io, iter, thread,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
-use log::{debug, error, trace, warn};
+use log::{trace, warn};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     constants::{
-        DEFAULT_INIT_RETRY_COUNT, DEFAULT_LOCAL_ACK_TIMEOUT, DEFAULT_TIMEOUT_CHECK_DURATION,
-        MAX_QP_CNT, QPN_KEY_PART_WIDTH,
+        DEFAULT_INIT_RETRY_COUNT, DEFAULT_LOCAL_ACK_TIMEOUT, DEFAULT_TIMEOUT_CHECK_DURATION, QPN_KEY_PART_WIDTH,
     },
-    rdma_utils::qp::{qpn_to_index, QpTable},
+    rdma_utils::qp::QpTable,
     workers::{
         retransmit::PacketRetransmitTask,
-        send::SendHandle,
         spawner::{SingleThreadTaskWorker, TaskTx},
     },
 };

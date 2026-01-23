@@ -60,7 +60,6 @@
 //! - `RING_OFFSET_BASE_LOW` / `RING_OFFSET_BASE_HIGH` - Physical address registers
 //! - `RING_OFFSET_HEAD` / `RING_OFFSET_TAIL` - Producer/consumer pointers
 
-use std::marker::PhantomData;
 
 #[derive(Clone, Copy)]
 enum BlockStart {

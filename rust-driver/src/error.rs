@@ -1,6 +1,6 @@
 //! Error types for the RDMA driver.
 
-use std::{fmt, io, net::AddrParseError};
+use std::{io, net::AddrParseError};
 use thiserror::Error;
 
 use crate::config::ConfigError;

@@ -1,7 +1,3 @@
-use std::{
-    io,
-    ops::{Deref, DerefMut},
-};
 
 use crate::{
     descriptors::simple_nic::{SimpleNicRxQueueDesc, SimpleNicTxQueueDesc},

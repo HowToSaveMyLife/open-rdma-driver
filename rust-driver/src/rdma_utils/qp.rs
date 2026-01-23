@@ -1,18 +1,14 @@
 use std::{
     iter, mem,
-    sync::{
-        atomic::{AtomicU16, AtomicU32, AtomicU8, Ordering},
-        Arc,
-    },
+    sync::Arc,
 };
 
 use bitvec::vec::BitVec;
-use ibverbs_sys::{ibv_qp, ibv_qp_type::IBV_QPT_RC, ibv_send_wr};
-use parking_lot::{Mutex, RwLock};
+use parking_lot::Mutex;
 use rand::Rng;
 
 use crate::{
-    constants::{MAX_MSN_WINDOW, MAX_PSN_WINDOW, MAX_QP_CNT, MAX_SEND_WR, QPN_KEY_PART_WIDTH},
+    constants::{MAX_PSN_WINDOW, MAX_QP_CNT, MAX_SEND_WR, QPN_KEY_PART_WIDTH},
     rdma_utils::psn::Psn,
 };
 

@@ -1,14 +1,8 @@
-use std::{
-    io,
-    ops::{Deref, DerefMut},
-};
+use std::io;
 
 use crate::{
     descriptors::DESC_SIZE,
-    mem::{
-        page::{ContiguousPages, HostPageAllocator, MmapMut, PageAllocator},
-        DmaBuf, DmaBufAllocator,
-    },
+    mem::{page::MmapMut, DmaBuf, DmaBufAllocator},
     ringbuf::dma_rb::{DmaRingBuf, RING_BUF_LEN},
 };
 
@@ -78,7 +72,7 @@ impl DescRingBuffer {
     }
 }
 
-pub(crate) struct DescRingBufAllocator<'a,  A> {
+pub(crate) struct DescRingBufAllocator<'a, A> {
     dma_buf_allocator: &'a mut A,
 }
 
@@ -95,7 +89,6 @@ impl<'a, A: DmaBufAllocator> DescRingBufAllocator<'a, A> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::ptr::NonNull;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     struct TestDesc {

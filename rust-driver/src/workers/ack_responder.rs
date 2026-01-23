@@ -13,7 +13,7 @@ use pnet::{
 };
 
 use crate::{
-    constants::{CARD_MAC_ADDRESS, CARD_MAC_ADDRESS_OCTETS, PSN_MASK},
+    constants::CARD_MAC_ADDRESS_OCTETS,
     net::simple_nic::FrameTx,
     rdma_utils::{psn::Psn, qp::QpTableShared, types::QpAttr},
     workers::spawner::SingleThreadTaskWorker,

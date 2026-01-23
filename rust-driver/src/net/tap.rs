@@ -3,7 +3,6 @@
 use std::{io, os::fd::AsRawFd, sync::Arc};
 
 use ipnetwork::IpNetwork;
-use tun::AbstractDevice;
 
 use super::config::{MacAddress, NetworkConfig, NetworkResolver};
 

@@ -1,5 +1,5 @@
 use std::{
-    net::{IpAddr, Ipv4Addr, UdpSocket},
+    net::{Ipv4Addr, UdpSocket},
     sync::{atomic::AtomicBool, Arc},
 };
 
@@ -42,7 +42,7 @@ fn worker_loopback() {
     let socket_tx = UdpSocket::bind("127.0.0.1:0").unwrap();
     let socket_rx = UdpSocket::bind("127.0.0.1:0").unwrap();
     socket_tx.connect(socket_rx.local_addr().unwrap()).unwrap();
-    socket_rx.set_nonblocking(true);
+    socket_rx.set_nonblocking(true).unwrap();
     let frame_tx = FrameTxSocket(socket_tx);
     let frame_rx = FrameRxSocket {
         buffer: Vec::new(),

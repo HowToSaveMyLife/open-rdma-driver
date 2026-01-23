@@ -89,7 +89,7 @@ impl WrChunkBuilder<Initial> {
     }
 
     pub(crate) fn new_with_opcode(opcode: WorkReqOpCode) -> Self {
-        let mut inner = WrChunk {
+        let inner = WrChunk {
             opcode,
             ..Default::default()
         };

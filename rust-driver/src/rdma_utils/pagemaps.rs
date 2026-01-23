@@ -1,8 +1,7 @@
 use crate::types::VirtAddr;
-use std::ptr;
 
 pub(crate) fn check_addr_is_anon_hugepage(addr: VirtAddr, length: usize) -> bool {
-    use pagemap::{PageMap, PageMapError};
+    use pagemap::PageMap;
 
     let pid = std::process::id() as u64;
 
@@ -26,6 +25,8 @@ pub(crate) fn check_addr_is_anon_hugepage(addr: VirtAddr, length: usize) -> bool
 
 #[test]
 fn test_check_addr_is_anon_hugepage() {
+    use std::ptr;
+
     let len = 1024 * 1024 * 4; // 4MB
 
     //TODO need to move unsafe code to a separate function

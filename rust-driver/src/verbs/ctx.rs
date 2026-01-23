@@ -1,14 +1,6 @@
-use std::{
-    io, iter,
-    net::Ipv4Addr,
-    sync::{atomic::AtomicBool, Arc},
-    thread::current,
-    time::Duration,
-};
+use std::{iter, net::Ipv4Addr, time::Duration};
 
-use crossbeam_deque::Worker;
-use log::{debug, error, info, trace};
-use parking_lot::Mutex;
+use log::{debug, error};
 
 use crate::{
     cmd::{CommandConfigurator, MttUpdate, PgtUpdate, RecvBufferMeta, UpdateQp},
@@ -16,8 +8,7 @@ use crate::{
     constants::CARD_MAC_ADDRESS,
     csr::{mode::Mode, DeviceAdaptor},
     mem::{
-        get_num_page, page::PageAllocator, pin_pages, virt_to_phy::AddressResolver, DmaBuf,
-        DmaBufAllocator, MemoryPinner, UmemHandler, PAGE_SIZE, PAGE_SIZE_BITS,
+        get_num_page, virt_to_phy::AddressResolver, DmaBuf, DmaBufAllocator, UmemHandler, PAGE_SIZE,
     },
     net::{
         config::NetworkConfig,
@@ -36,11 +27,11 @@ use crate::{
         qp::{QpManager, QpTableShared},
         types::{
             ibv_qp_attr::{IbvQpAttr, IbvQpInitAttr},
-            QpAttr, RecvWr, SendWr, SendWrBase, SendWrRdma,
+            QpAttr, RecvWr, SendWr, SendWrRdma,
         },
     },
     ringbuf::DescRingBufAllocator,
-    types::{PageAlignedVirtAddr, PhysAddr, RemoteAddr, VirtAddr},
+    types::{RemoteAddr, VirtAddr},
     workers::{
         ack_responder::AckResponder,
         completion::{
@@ -51,7 +42,7 @@ use crate::{
         qp_timeout::QpAckTimeoutWorker,
         rdma::{RdmaWriteTask, RdmaWriteWorker},
         retransmit::PacketRetransmitWorker,
-        send::{self, SendHandle},
+        send::{self},
         spawner::{task_channel, AbortSignal, SingleThreadTaskWorker, TaskTx},
     },
     RdmaError,
@@ -461,7 +452,7 @@ where
                     "pgt map va -> pa: 0x{va_start_for_debug:x} -> 0x{:x}",
                     phy_addr.as_u64()
                 );
-                va_start_for_debug += (PAGE_SIZE as u64);
+                va_start_for_debug += PAGE_SIZE as u64;
             }
             self.cmd_controller.update_pgt(pgt_update);
         }
@@ -696,7 +687,7 @@ where
             .take(max_num_entries)
             .flatten()
             .collect();
-        if (!ret.is_empty()) {
+        if !ret.is_empty() {
             debug!("poll_cq returned {ret:?}");
         }
         ret

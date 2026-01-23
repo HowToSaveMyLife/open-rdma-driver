@@ -1,13 +1,11 @@
-use std::{collections::HashMap, io, iter, mem::take, ops::Range};
+use std::{collections::HashMap, io};
 
 use bitvec::{array::BitArray, bitarr};
 use rand::Rng;
 
 use crate::{
     constants::{LR_KEY_KEY_PART_WIDTH, MAX_MR_CNT, PGT_LEN},
-    mem::{
-        get_num_page, page::ContiguousPages, virt_to_phy::AddressResolver, UmemHandler, PAGE_SIZE,
-    },
+    mem::{UmemHandler, PAGE_SIZE},
     rdma_utils::mr_region_manager::MrRegionManager,
     types::VirtAddr,
     RdmaError,
@@ -291,6 +289,7 @@ impl PgtAlloc {
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::iter;
 
     #[test]
     fn mr_table_alloc_dealloc_ok() {

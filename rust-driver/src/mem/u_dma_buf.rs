@@ -1,5 +1,5 @@
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{File, OpenOptions},
     io::{self, Read},
     os::{fd::AsRawFd, unix::fs::OpenOptionsExt},
     path::PathBuf,
@@ -8,10 +8,7 @@ use std::{
 
 use crate::{constants::U_DMA_BUF_CLASS_PATH, types::PhysAddr};
 
-use super::{
-    page::{ContiguousPages, MmapMut, PageAllocator},
-    DmaBuf, DmaBufAllocator,
-};
+use super::{page::MmapMut, DmaBuf, DmaBufAllocator};
 
 pub(crate) struct UDmaBufAllocator {
     fd: File,
@@ -102,10 +99,8 @@ impl DmaBufAllocator for UDmaBufAllocator {
 
 #[cfg(test)]
 mod tests {
-    use crate::mem::virt_to_phy::{AddressResolver, PhysAddrResolverLinuxX86};
 
     use super::*;
-    use std::io::ErrorKind;
 
     #[test]
     #[allow(clippy::print_stderr)]

@@ -5,9 +5,7 @@ use std::{
     path::PathBuf,
 };
 
-use default_net::gateway;
-use ipnetwork::{IpNetwork, Ipv4Network};
-use pnet::datalink;
+use ipnetwork::Ipv4Network;
 
 use crate::{
     constants::{BLUE_RDMA_NETDEV_INTERFACE_NAME, BLUE_RDMA_SYSFS_PATH},

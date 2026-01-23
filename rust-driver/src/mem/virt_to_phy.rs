@@ -3,8 +3,6 @@ use std::{
     io::{self, Read, Seek},
 };
 
-use log::debug;
-
 use crate::types::{PageAlignedPhysAddr, PageAlignedVirtAddr, PhysAddr, VirtAddr};
 
 /// Size of the PFN (Page Frame Number) mask in bytes
@@ -90,7 +88,7 @@ impl AddressResolver for PhysAddrResolverLinuxX86 {
     fn virt_to_phys(&self, virt_addr: VirtAddr) -> io::Result<Option<PhysAddr>> {
         let virt_addr_raw = virt_addr.as_u64();
         let base_page_size = get_base_page_size();
-        let mut file = File::open("/proc/self/pagemap")?;
+        let file = File::open("/proc/self/pagemap")?;
         let virt_pfn = virt_addr_raw / base_page_size;
         let offset = PFN_MASK_SIZE as u64 * virt_pfn;
         let mut buf = [0u8; PFN_MASK_SIZE];
@@ -175,7 +173,7 @@ impl AddressResolver for PhysAddrResolverLinuxX86 {
         if maybe_gpu_ptr {
             debug_assert!(phy_addrs.iter().all(Option::is_none), "invalid address");
 
-            let Ok(mut gpu_ptr_translator) = File::open("/dev/gpu_ptr_translator") else {
+            let Ok(gpu_ptr_translator) = File::open("/dev/gpu_ptr_translator") else {
                 return Ok(phy_addrs);
             };
 

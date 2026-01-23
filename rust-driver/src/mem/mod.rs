@@ -1,11 +1,3 @@
-use std::{
-    io,
-    ops::{Deref, DerefMut},
-    sync::Arc,
-};
-
-use crate::types::{PageAlignedPhysAddr, PageAlignedVirtAddr, PhysAddr, VirtAddr};
-
 /// Tools for converting virtual address to physicall address
 pub(crate) mod virt_to_phy;
 
@@ -23,11 +15,19 @@ mod utils;
 /// PA ↔ VA bidirectional mapping for simulation mode
 pub(crate) mod pa_va_map;
 
-use page::MmapMut;
 pub(crate) use utils::*;
-use virt_to_phy::{AddressResolver, PhysAddrResolverLinuxX86};
 
-use crate::mem::pa_va_map::PaVaMap;
+use std::{
+    io,
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
+
+use crate::{
+    mem::{pa_va_map::PaVaMap, virt_to_phy::{AddressResolver, PhysAddrResolverLinuxX86}},
+    types::{PageAlignedPhysAddr, PageAlignedVirtAddr, PhysAddr, VirtAddr},
+};
+use page::MmapMut;
 
 /// Number of bits for a 4KB page size
 #[cfg(all(target_arch = "x86_64", feature = "page_size_4k"))]

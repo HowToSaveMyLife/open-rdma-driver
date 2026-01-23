@@ -1,13 +1,3 @@
-use std::{
-    io,
-    sync::{
-        atomic::{fence, AtomicBool, Ordering},
-        Arc,
-    },
-    thread,
-    time::Duration,
-};
-
 use log::{debug, error};
 
 use crate::{
@@ -342,7 +332,7 @@ impl MetaHandler {
                 base_psn,
             });
         }
-        /// Timeout of an `AckReq` message, notify retransmission
+        // Timeout of an `AckReq` message, notify retransmission
         if matches!(pos, PacketPos::Last | PacketPos::Only) && is_retry && ack_req {
             self.ack_tx.send(AckResponse::Nak {
                 qpn: dqpn,
@@ -357,10 +347,7 @@ impl MetaHandler {
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        rdma_utils::psn_tracker::{LocalAckTracker, RemoteAckTracker},
-        workers::spawner::{task_channel, TaskRx},
-    };
+    use crate::workers::spawner::{task_channel, TaskRx};
 
     use super::*;
 

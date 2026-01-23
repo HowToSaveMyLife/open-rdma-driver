@@ -16,7 +16,6 @@ pub(crate) mod send;
 pub(crate) use cmd::*;
 pub(crate) use meta_report::*;
 pub(crate) use send::*;
-pub(crate) use simple_nic::*;
 
 use bilge::prelude::*;
 

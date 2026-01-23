@@ -49,19 +49,13 @@ use parking_lot::Mutex;
 use pci_driver::{
     backends::vfio::VfioPciDevice,
     device::PciDevice,
-    regions::{MappedOwningPciRegion, OwningPciRegion, PciRegion, Permissions},
+    regions::{MappedOwningPciRegion, PciRegion, Permissions},
 };
-use pci_info::PciInfo;
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::OpenOptions,
     io,
-    path::{Path, PathBuf},
+    path::Path,
     sync::Arc,
-};
-
-use crate::mem::{
-    dmabuf::DmaBufAllocator, page::HostPageAllocator, u_dma_buf::UDmaBufAllocator,
-    virt_to_phy::PhysAddrResolverLinuxX86, HostUmemHandler,
 };
 
 use super::DeviceAdaptor;

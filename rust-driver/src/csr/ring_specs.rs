@@ -60,7 +60,7 @@
 use crate::csr::{
     device_adaptor::{DeviceAdaptor, Ring, RingSpec, RingSpecToCard, RingSpecToHost},
     constants::{
-        CMD_REQ_RING_BASE, CMD_RESP_RING_BASE, NUM_QPS, QP_RECV_RING_BASES, QP_SEND_RING_BASES,
+        CMD_REQ_RING_BASE, CMD_RESP_RING_BASE, QP_RECV_RING_BASES, QP_SEND_RING_BASES,
         SIMPLE_NIC_RX_RING_BASE, SIMPLE_NIC_TX_RING_BASE,
     },
     mode::Mode,

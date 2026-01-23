@@ -1,9 +1,6 @@
-use bitvec::{bits, order::Lsb0, vec::BitVec, view::BitView};
+use bitvec::vec::BitVec;
 
-use crate::{
-    constants::{MAX_PSN_WINDOW, PSN_MASK},
-    rdma_utils::psn::Psn,
-};
+use crate::rdma_utils::psn::Psn;
 
 #[derive(Debug, Default)]
 pub(crate) struct LocalAckTracker {
@@ -94,7 +91,7 @@ impl PsnTracker {
     ///
     /// Returns `Some(PSN)` if the left edge of the PSN window is advanced, where the
     /// returned `PSN` is the new base PSN value after the advance.
-    pub(crate) fn ack_bitmap(&mut self, mut now_psn: Psn, mut bitmap: u128) -> Option<Psn> {
+    pub(crate) fn ack_bitmap(&mut self, now_psn: Psn, bitmap: u128) -> Option<Psn> {
         let rstart = self.rstart(now_psn);
         let rend = rstart + 128;
         if let Ok(x) = usize::try_from(rend) {
@@ -190,7 +187,7 @@ impl PsnTracker {
             return None;
         }
         self.inner.shift_left(pos);
-        let mut psn = self.base_psn;
+        let psn = self.base_psn;
         self.base_psn += pos as u32;
         Some(self.base_psn)
     }
@@ -199,6 +196,7 @@ impl PsnTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::PSN_MASK;
 
     #[test]
     fn test_ack_one() {

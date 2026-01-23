@@ -1,16 +1,15 @@
-use std::{collections::VecDeque, iter, ops::ControlFlow, sync::Arc};
+use std::{collections::VecDeque, iter, sync::Arc};
 
 use bitvec::vec::BitVec;
 use crossbeam_queue::SegQueue;
-use log::{debug, trace};
-use parking_lot::Mutex;
+use log::debug;
 
 use crate::{
     constants::MAX_CQ_CNT,
     rdma_utils::{
         msn::Msn,
         psn::Psn,
-        qp::{qpn_to_index, QpTable, QpTableShared},
+        qp::{QpTable, QpTableShared},
         types::QpAttr,
     },
     workers::{

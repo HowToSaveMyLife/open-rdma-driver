@@ -1,9 +1,7 @@
-use std::io;
 
-use log::{error, debug};
+use log::debug;
 
 use crate::{
-    constants::PSN_MASK,
     csr::{DeviceAdaptor, MetaReportRing, ReaderOps},
     descriptors::{
         MetaReportQueueAckDesc, MetaReportQueueAckExtraDesc, MetaReportQueueDescFirst,
@@ -12,10 +10,6 @@ use crate::{
     },
     rdma_utils::psn::Psn,
     ringbuf::DescRingBuffer,
-    workers::{
-        ack_responder::AckResponse, completion::CompletionTask, qp_timeout::AckTimeoutTask,
-        rdma::RdmaWriteTask, retransmit::PacketRetransmitTask,
-    },
 };
 
 pub(crate) struct MetaReportQueueCtx<Dev: DeviceAdaptor> {

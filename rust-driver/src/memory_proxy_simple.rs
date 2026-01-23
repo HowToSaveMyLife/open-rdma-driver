@@ -11,20 +11,18 @@
 
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::fmt::Error;
 use std::io::BufRead;
 
-use crate::types::{PhysAddr, VirtAddr};
+use crate::types::PhysAddr;
 use std::io::BufReader;
 use std::io::Write;
 use std::net::SocketAddr;
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpStream;
 use std::sync::Arc;
 use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use crate::descriptors::send;
 use crate::mem::pa_va_map::PaVaMap;
 
 /// Simplified memory access request from simulator

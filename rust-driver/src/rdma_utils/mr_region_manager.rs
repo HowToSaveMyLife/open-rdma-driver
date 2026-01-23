@@ -55,7 +55,7 @@ impl MrRegionManager {
             // asset is not overlap
             assert!(tmp_end <= start);
 
-            if (phy_page_start(tmp_end - 1) == start_page) {
+            if phy_page_start(tmp_end - 1) == start_page {
                 start_page + PAGE_SIZE
             } else {
                 start_page
@@ -69,7 +69,7 @@ impl MrRegionManager {
             // asset is not overlap
             assert!(*tmp_start >= end);
 
-            if (phy_page_start(*tmp_start) == end_page) {
+            if phy_page_start(*tmp_start) == end_page {
                 end_page
             } else {
                 end_page + PAGE_SIZE
@@ -198,7 +198,7 @@ mod tests {
 
     #[test]
     fn test_get_pin_range_single_page() {
-        let mut manager = MrRegionManager::new();
+        let manager = MrRegionManager::new();
 
         // Test with no existing regions
         let start = 0x20_0000;
@@ -212,7 +212,7 @@ mod tests {
 
     #[test]
     fn test_get_pin_range_multiple_pages() {
-        let mut manager = MrRegionManager::new();
+        let manager = MrRegionManager::new();
 
         // Test range spanning multiple pages
         let start = 0x20_0000;
@@ -408,7 +408,7 @@ mod tests {
 
     #[test]
     fn test_get_pin_range_exact_page_alignment() {
-        let mut manager = MrRegionManager::new();
+        let manager = MrRegionManager::new();
 
         // Test with exactly page-aligned addresses (2MB)
         let start = 0x20_0000;
@@ -421,7 +421,7 @@ mod tests {
 
     #[test]
     fn test_get_pin_range_spanning_single_page() {
-        let mut manager = MrRegionManager::new();
+        let manager = MrRegionManager::new();
 
         // Test range within a single page (2MB)
         let start = 0x20_1000;

@@ -101,7 +101,7 @@ impl PaVaMap {
 
         // Check for overlaps with existing ranges
         for existing_range in self.ranges.values() {
-            if (range.pa_start < existing_range.pa_end && range.pa_end > existing_range.pa_start) {
+            if range.pa_start < existing_range.pa_end && range.pa_end > existing_range.pa_start {
                 panic!(
                     "PA range overlap detected: new [{:#x}, {:#x}) conflicts with existing [{:#x}, {:#x})",
                     range.pa_start.as_u64(), range.pa_end.as_u64(), existing_range.pa_start.as_u64(), existing_range.pa_end.as_u64()

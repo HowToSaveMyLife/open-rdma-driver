@@ -1,26 +1,16 @@
-use std::ptr::NonNull;
-use std::sync::{LazyLock, OnceLock};
-use std::{io, net::Ipv4Addr, ptr};
-
-use ipnetwork::{IpNetwork, Ipv4Network};
-use log::{debug, error, info};
-
 use crate::constants::{
     POST_RECV_TCP_LOOP_BACK_CLIENT_ADDRESS, POST_RECV_TCP_LOOP_BACK_SERVER_ADDRESS,
-    TEST_CARD_IP_ADDRESS,
 };
-use crate::csr::emulated::EmulatedDevice;
-use crate::memory_proxy_simple::SimpleMemoryProxyClient;
-use crate::memory_proxy_simple::SimpleTcpClient;
 use crate::rdma_utils::types::ibv_qp_attr::{IbvQpAttr, IbvQpInitAttr};
 use crate::rdma_utils::types::{RecvWr, SendWr};
 use crate::RdmaCtxOps;
 use crate::{
     config::{ConfigLoader, DeviceConfig},
-    mem::{page::EmulatedPageAllocator, EmulatedUmemHandler},
-    net::config::{MacAddress, NetworkConfig},
     workers::{completion::Completion, qp_timeout::AckTimeoutConfig},
 };
+use log::{debug, error};
+use std::ptr;
+use std::sync::OnceLock;
 
 use super::dev::{EmulatedHwDevice, PciHwDevice};
 use super::ffi::get_device;
@@ -67,7 +57,7 @@ impl BlueRdmaCore {
         device.set_custom()?;
 
         debug!("before initialize HwDeviceCtx");
-        let mut ctx = HwDeviceCtx::initialize(device, config)?;
+        let ctx = HwDeviceCtx::initialize(device, config)?;
         Ok(ctx)
     }
 
@@ -357,7 +347,7 @@ unsafe impl RdmaCtxOps for BlueRdmaCore {
     ) -> ::std::os::raw::c_int {
         let qp = deref_or_ret!(qp, libc::EINVAL);
         let context = qp.context;
-        let mut bluerdma = unsafe { get_device(context) };
+        let bluerdma = get_device(context);
 
         0
     }
@@ -463,7 +453,7 @@ unsafe impl RdmaCtxOps for BlueRdmaCore {
         let qp = deref_or_ret!(qp, libc::EINVAL);
         let context = qp.context;
         let qp_num = qp.qp_num;
-        let mut bluerdma = unsafe { get_device(context) };
+        let mut bluerdma = get_device(context);
         let mut count: usize = 0;
 
         // Traverse the entire WR chain

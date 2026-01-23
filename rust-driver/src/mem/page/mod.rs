@@ -5,14 +5,14 @@ mod host;
 mod emulated;
 
 pub(crate) use emulated::EmulatedPageAllocator;
-pub(crate) use host::HostPageAllocator;
 
 use std::{
     ffi::c_void,
     io,
     ops::{Deref, DerefMut},
-    ptr, slice,
+    ptr,
 };
+
 
 /// A trait for allocating contiguous physical memory pages.
 ///
@@ -121,12 +121,6 @@ impl MmapMut {
 #[allow(clippy::as_conversions, clippy::ptr_as_ptr)] // converting among different pointer types
 /// Implementations of `MmapMut`
 mod mmap_mut_impl {
-    use std::{
-        arch::x86_64::{_mm_clflush, _mm_mfence},
-        ops::{Deref, DerefMut},
-        slice,
-    };
-
     use super::MmapMut;
 
     impl Drop for MmapMut {

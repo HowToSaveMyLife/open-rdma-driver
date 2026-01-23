@@ -1,10 +1,7 @@
 mod types;
 mod worker;
 
-use std::{
-    io,
-    sync::{atomic::AtomicBool, Arc},
-};
+use std::io;
 
 use types::{MetaReportQueue, MetaReportQueueCtx, MetaReportQueueHandler};
 use worker::{MetaHandler, MetaWorker};
