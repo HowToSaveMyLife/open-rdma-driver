@@ -24,7 +24,6 @@ use std::{
 };
 
 use crate::{
-    csr::DeviceAdaptor,
     error::RdmaError,
     rdma_utils::{
         pagemaps::check_addr_is_anon_hugepage,
@@ -35,6 +34,7 @@ use crate::{
             RecvWr, SendWr,
         },
     },
+    ring::traits::DeviceAdaptor,
     types::{PhysAddr, VirtAddr},
 };
 

@@ -24,8 +24,8 @@
 //!
 //! Convenient type aliases combine device adaptors with ring specifications:
 //! ```rust,ignore
-//! type SendRing<Dev> = Ring<Dev, SendRingSpec>;
-//! type MetaReportRing<Dev> = Ring<Dev, MetaReportRingSpec>;
+//! type SendRingCsr<Dev> = RingCsr<Dev, SendRingSpec>;
+//! type MetaReportRingCsr<Dev> = RingCsr<Dev, MetaReportRingSpec>;
 //! ```
 //!
 //! # Constructor Functions
@@ -57,13 +57,20 @@
 //! assert_eq!(send_rings.len(), 4);  // 4 channels in 400G mode
 //! ```
 
-use crate::csr::{
-    device_adaptor::{DeviceAdaptor, Ring, RingSpec, RingSpecToCard, RingSpecToHost},
+use super::csr::{
     constants::{
         CMD_REQ_RING_BASE, CMD_RESP_RING_BASE, QP_RECV_RING_BASES, QP_SEND_RING_BASES,
         SIMPLE_NIC_RX_RING_BASE, SIMPLE_NIC_TX_RING_BASE,
     },
     mode::Mode,
+    ring_csr::RingCsr,
+};
+
+use super::descriptors::*;
+
+use crate::ring::{
+    descriptors::simple_nic::{SimpleNicRxQueueDesc, SimpleNicTxQueueDesc},
+    traits::{DeviceAdaptor, RingSpec, RingSpecToCard, RingSpecToHost},
 };
 
 pub(crate) struct CmdReqSpec;
@@ -72,7 +79,9 @@ impl RingSpec for CmdReqSpec {
         CMD_REQ_RING_BASE
     }
 }
-impl RingSpecToCard for CmdReqSpec {}
+impl RingSpecToCard for CmdReqSpec {
+    type Element = CmdQueueDesc;
+}
 
 pub(crate) struct CmdRespSpec;
 impl RingSpec for CmdRespSpec {
@@ -80,7 +89,9 @@ impl RingSpec for CmdRespSpec {
         CMD_RESP_RING_BASE
     }
 }
-impl RingSpecToHost for CmdRespSpec {}
+impl RingSpecToHost for CmdRespSpec {
+    type Element = CmdRespQueueDesc;
+}
 
 pub(crate) struct SimpleNicTxSpec;
 impl RingSpec for SimpleNicTxSpec {
@@ -88,7 +99,9 @@ impl RingSpec for SimpleNicTxSpec {
         SIMPLE_NIC_TX_RING_BASE
     }
 }
-impl RingSpecToCard for SimpleNicTxSpec {}
+impl RingSpecToCard for SimpleNicTxSpec {
+    type Element = SimpleNicTxQueueDesc;
+}
 
 pub(crate) struct SimpleNicRxSpec;
 impl RingSpec for SimpleNicRxSpec {
@@ -96,7 +109,9 @@ impl RingSpec for SimpleNicRxSpec {
         SIMPLE_NIC_RX_RING_BASE
     }
 }
-impl RingSpecToHost for SimpleNicRxSpec {}
+impl RingSpecToHost for SimpleNicRxSpec {
+    type Element = SimpleNicRxQueueDesc;
+}
 
 pub(crate) struct SendRingSpec(pub(crate) usize);
 impl RingSpec for SendRingSpec {
@@ -104,7 +119,9 @@ impl RingSpec for SendRingSpec {
         QP_SEND_RING_BASES[self.0]
     }
 }
-impl RingSpecToCard for SendRingSpec {}
+impl RingSpecToCard for SendRingSpec {
+    type Element = SendQueueDesc;
+}
 
 pub(crate) struct MetaReportRingSpec(pub(crate) usize);
 impl RingSpec for MetaReportRingSpec {
@@ -112,18 +129,20 @@ impl RingSpec for MetaReportRingSpec {
         QP_RECV_RING_BASES[self.0]
     }
 }
-impl RingSpecToHost for MetaReportRingSpec {}
+impl RingSpecToHost for MetaReportRingSpec {
+    type Element = MetaReportQueueDesc;
+}
 
 // ============================================================================
 // Public type aliases
 // ============================================================================
 
-pub(crate) type CmdReqRing<Dev> = Ring<Dev, CmdReqSpec>;
-pub(crate) type CmdRespRing<Dev> = Ring<Dev, CmdRespSpec>;
-pub(crate) type SimpleNicTxRing<Dev> = Ring<Dev, SimpleNicTxSpec>;
-pub(crate) type SimpleNicRxRing<Dev> = Ring<Dev, SimpleNicRxSpec>;
-pub(crate) type SendRing<Dev> = Ring<Dev, SendRingSpec>;
-pub(crate) type MetaReportRing<Dev> = Ring<Dev, MetaReportRingSpec>;
+pub(crate) type CmdReqRingCsr<Dev> = RingCsr<Dev, CmdReqSpec>;
+pub(crate) type CmdRespRingCsr<Dev> = RingCsr<Dev, CmdRespSpec>;
+pub(crate) type SimpleNicTxRingCsr<Dev> = RingCsr<Dev, SimpleNicTxSpec>;
+pub(crate) type SimpleNicRxRingCsr<Dev> = RingCsr<Dev, SimpleNicRxSpec>;
+pub(crate) type SendRingCsr<Dev> = RingCsr<Dev, SendRingSpec>;
+pub(crate) type MetaReportRingCsr<Dev> = RingCsr<Dev, MetaReportRingSpec>;
 
 // ============================================================================
 // Singleton ring constructors
@@ -131,26 +150,26 @@ pub(crate) type MetaReportRing<Dev> = Ring<Dev, MetaReportRingSpec>;
 
 /// Create a command request ring
 #[inline]
-pub(crate) fn cmd_req_ring<Dev: DeviceAdaptor>(dev: Dev) -> CmdReqRing<Dev> {
-    Ring::new(dev, CmdReqSpec)
+pub(crate) fn cmd_req_ring<Dev: DeviceAdaptor>(dev: Dev) -> CmdReqRingCsr<Dev> {
+    RingCsr::new(dev, CmdReqSpec)
 }
 
 /// Create a command response ring
 #[inline]
-pub(crate) fn cmd_resp_ring<Dev: DeviceAdaptor>(dev: Dev) -> CmdRespRing<Dev> {
-    Ring::new(dev, CmdRespSpec)
+pub(crate) fn cmd_resp_ring<Dev: DeviceAdaptor>(dev: Dev) -> CmdRespRingCsr<Dev> {
+    RingCsr::new(dev, CmdRespSpec)
 }
 
 /// Create a Simple NIC TX ring
 #[inline]
-pub(crate) fn simple_nic_tx_ring<Dev: DeviceAdaptor>(dev: Dev) -> SimpleNicTxRing<Dev> {
-    Ring::new(dev, SimpleNicTxSpec)
+pub(crate) fn simple_nic_tx_ring<Dev: DeviceAdaptor>(dev: Dev) -> SimpleNicTxRingCsr<Dev> {
+    RingCsr::new(dev, SimpleNicTxSpec)
 }
 
 /// Create a Simple NIC RX ring
 #[inline]
-pub(crate) fn simple_nic_rx_ring<Dev: DeviceAdaptor>(dev: Dev) -> SimpleNicRxRing<Dev> {
-    Ring::new(dev, SimpleNicRxSpec)
+pub(crate) fn simple_nic_rx_ring<Dev: DeviceAdaptor>(dev: Dev) -> SimpleNicRxRingCsr<Dev> {
+    RingCsr::new(dev, SimpleNicRxSpec)
 }
 
 // ============================================================================
@@ -161,10 +180,10 @@ pub(crate) fn simple_nic_rx_ring<Dev: DeviceAdaptor>(dev: Dev) -> SimpleNicRxRin
 pub(crate) fn build_send_rings<Dev: DeviceAdaptor + Clone>(
     dev: Dev,
     mode: Mode,
-) -> Vec<SendRing<Dev>> {
+) -> Vec<SendRingCsr<Dev>> {
     mode.channel_ids()
         .iter()
-        .map(|&id| Ring::new(dev.clone(), SendRingSpec(id)))
+        .map(|&id| RingCsr::new(dev.clone(), SendRingSpec(id)))
         .collect()
 }
 
@@ -172,10 +191,10 @@ pub(crate) fn build_send_rings<Dev: DeviceAdaptor + Clone>(
 pub(crate) fn build_meta_report_rings<Dev: DeviceAdaptor + Clone>(
     dev: Dev,
     mode: Mode,
-) -> Vec<MetaReportRing<Dev>> {
+) -> Vec<MetaReportRingCsr<Dev>> {
     mode.channel_ids()
         .iter()
-        .map(|&id| Ring::new(dev.clone(), MetaReportRingSpec(id)))
+        .map(|&id| RingCsr::new(dev.clone(), MetaReportRingSpec(id)))
         .collect()
 }
 
@@ -183,9 +202,9 @@ pub(crate) fn build_meta_report_rings<Dev: DeviceAdaptor + Clone>(
 mod tests {
     use super::*;
 
+    use crate::ring::csr::emulated::EmulatedDevice;
     #[test]
     fn test_build_rings_100g() {
-        use crate::csr::emulated::EmulatedDevice;
         let dev = EmulatedDevice::new("test").unwrap();
 
         let send_rings = build_send_rings(dev.clone(), Mode::Mode100G);
@@ -197,7 +216,6 @@ mod tests {
 
     #[test]
     fn test_build_rings_400g() {
-        use crate::csr::emulated::EmulatedDevice;
         let dev = EmulatedDevice::new("test").unwrap();
 
         let send_rings = build_send_rings(dev.clone(), Mode::Mode400G);

@@ -11,15 +11,16 @@ use crate::memory_proxy_simple::{SimpleMemoryProxyClient, SimpleTcpClient};
 
 use crate::{
     constants::{DEVICE_ID, PCI_SYSFS_BUS_PATH, VENDER_ID},
-    csr::{emulated::EmulatedDevice, hardware::SysfsPciCsrAdaptor, DeviceAdaptor},
     error::Result,
     mem::{
         page::EmulatedPageAllocator, u_dma_buf::UDmaBufAllocator, EmulatedUmemHandler,
         HostUmemHandler,
     },
+    ring::csr::{emulated::EmulatedDevice, hardware::SysfsPciCsrAdaptor},
 };
 
 use crate::mem::pa_va_map::PaVaMap;
+use crate::ring::traits::DeviceAdaptor;
 
 use super::mock::{MockDeviceAdaptor, MockDmaBufAllocator, MockUmemHandler};
 

@@ -1,98 +1,59 @@
 use crate::{
-    descriptors::{
-        CmdQueueReqDescQpManagement, CmdQueueReqDescSetNetworkParam,
-        CmdQueueReqDescSetRawPacketReceiveMeta, CmdQueueReqDescUpdateMrTable,
-        CmdQueueReqDescUpdatePGT,
-    },
     mem::page::ContiguousPages,
-    ringbuf::{DescDeserialize, DescRingBuffer},
     types::{PhysAddr, VirtAddr},
 };
 
+// Re-export descriptor types for use in other modules
+pub(crate) use crate::ring::descriptors::cmd::{
+    CmdQueueReqDescQpManagement, CmdQueueReqDescSetNetworkParam,
+    CmdQueueReqDescSetRawPacketReceiveMeta, CmdQueueReqDescUpdateMrTable, CmdQueueReqDescUpdatePGT,
+};
+
 /// Command queue for submitting commands to the device
-pub(crate) struct CmdQueue {
-    /// Inner ring buffer
-    inner: DescRingBuffer,
-}
+// pub(crate) struct CmdQueue<Dev: DeviceAdaptor> {
+//     /// Inner ring buffer
+//     inner: ProducerRingDefault<Dev, CmdReqSpec>,
+// }
 
-/// Command queue descriptor types that can be submitted
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum CmdQueueDesc {
-    /// Update first stage table command
-    UpdateMrTable(CmdQueueReqDescUpdateMrTable),
-    /// Update second stage table command
-    UpdatePGT(CmdQueueReqDescUpdatePGT),
-    /// Manage Queue Pair operations
-    ManageQP(CmdQueueReqDescQpManagement),
-    /// Set network parameters
-    SetNetworkParam(CmdQueueReqDescSetNetworkParam),
-    /// Set metadata for raw packet receive operations
-    SetRawPacketReceiveMeta(CmdQueueReqDescSetRawPacketReceiveMeta),
-}
+// impl<Dev: DeviceAdaptor> CmdQueue<Dev> {
+//     /// Creates a new `CmdQueue`
+//     pub(crate) fn new(ring: ProducerRingDefault<Dev, CmdReqSpec>) -> Self {
+//         Self { inner: ring }
+//     }
 
-impl CmdQueue {
-    /// Creates a new `CmdQueue`
-    pub(crate) fn new(ring_buffer: DescRingBuffer) -> Self {
-        Self { inner: ring_buffer }
-    }
+//     /// Produces command descriptors to the queue
+//     pub(crate) fn push(&mut self, desc: CmdQueueDesc) -> bool {
+//         self.inner.try_push(desc).unwrap()
+//     }
 
-    /// Produces command descriptors to the queue
-    pub(crate) fn push(&mut self, desc: CmdQueueDesc) -> bool {
-        match desc {
-            CmdQueueDesc::UpdateMrTable(d) => self.inner.push(&d),
-            CmdQueueDesc::UpdatePGT(d) => self.inner.push(&d),
-            CmdQueueDesc::ManageQP(d) => self.inner.push(&d),
-            CmdQueueDesc::SetNetworkParam(d) => self.inner.push(&d),
-            CmdQueueDesc::SetRawPacketReceiveMeta(d) => self.inner.push(&d),
-        }
-    }
+//     /// Returns the head pointer
+//     pub(crate) fn head(&self) -> u32 {
+//         self.inner.head()
+//     }
+// }
 
-    /// Returns the head pointer
-    pub(crate) fn head(&self) -> u32 {
-        self.inner.head() as u32
-    }
+// /// Queue for receiving command responses from the device
+// pub(crate) struct CmdRespQueue<Dev: DeviceAdaptor> {
+//     /// Inner ring buffer
+//     inner: ComsumerRingDefault<Dev, CmdRespSpec>,
+// }
 
-    pub(crate) fn set_tail(&mut self, tail: u32) {
-        self.inner.set_tail(tail);
-    }
-}
+// impl<Dev: DeviceAdaptor> CmdRespQueue<Dev> {
+//     /// Creates a new `CmdRespQueue`
+//     pub(crate) fn new(ring: ComsumerRingDefault<Dev, CmdRespSpec>) -> Self {
+//         Self { inner: ring }
+//     }
 
-/// Command queue response descriptor type
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct CmdRespQueueDesc([u8; 32]);
+//     /// Tries to poll next valid entry from the queue
+//     pub(crate) fn try_pop(&mut self) -> Option<CmdRespQueueDesc> {
+//         self.inner.try_pop().unwrap()
+//     }
 
-impl DescDeserialize for CmdRespQueueDesc {
-    fn deserialize(d: [u8; 32]) -> Self {
-        Self(d)
-    }
-}
-
-/// Queue for receiving command responses from the device
-pub(crate) struct CmdRespQueue {
-    /// Inner ring buffer
-    inner: DescRingBuffer,
-}
-
-impl CmdRespQueue {
-    /// Creates a new `CmdRespQueue`
-    pub(crate) fn new(ring_buffer: DescRingBuffer) -> Self {
-        Self { inner: ring_buffer }
-    }
-
-    /// Tries to poll next valid entry from the queue
-    pub(crate) fn try_pop(&mut self) -> Option<CmdRespQueueDesc> {
-        self.inner.pop()
-    }
-
-    /// Return tail pointer
-    pub(crate) fn tail(&self) -> u32 {
-        self.inner.tail() as u32
-    }
-
-    pub(crate) fn set_head(&mut self, head: u32) {
-        self.inner.set_head(head);
-    }
-}
+//     /// Return tail pointer
+//     pub(crate) fn tail(&self) -> u32 {
+//         self.inner.tail()
+//     }
+// }
 
 #[allow(clippy::missing_docs_in_private_items)]
 /// Memory Translation Table entry

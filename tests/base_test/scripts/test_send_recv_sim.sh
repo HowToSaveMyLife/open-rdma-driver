@@ -11,5 +11,5 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 MSG_LEN=${1:-4096}
 
 # 调用通用的双端测试脚本
-exec "$SCRIPT_DIR/run_dual_sim_test.sh" send_rec $MSG_LEN
+exec "$SCRIPT_DIR/run_dual_sim_test.sh" send_recv $MSG_LEN
 

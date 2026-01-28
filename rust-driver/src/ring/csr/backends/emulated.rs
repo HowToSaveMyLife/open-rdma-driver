@@ -72,7 +72,7 @@ use std::{
 use log::debug;
 use serde::{Deserialize, Serialize};
 
-use super::DeviceAdaptor;
+use crate::ring::traits::DeviceAdaptor;
 
 #[derive(Debug, Clone)]
 pub(super) struct RpcClient(Arc<UdpSocket>);

@@ -24,7 +24,10 @@ use std::{
 };
 
 use crate::{
-    mem::{pa_va_map::PaVaMap, virt_to_phy::{AddressResolver, PhysAddrResolverLinuxX86}},
+    mem::{
+        pa_va_map::PaVaMap,
+        virt_to_phy::{AddressResolver, PhysAddrResolverLinuxX86},
+    },
     types::{PageAlignedPhysAddr, PageAlignedVirtAddr, PhysAddr, VirtAddr},
 };
 use page::MmapMut;

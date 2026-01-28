@@ -51,14 +51,9 @@ use pci_driver::{
     device::PciDevice,
     regions::{MappedOwningPciRegion, PciRegion, Permissions},
 };
-use std::{
-    fs::OpenOptions,
-    io,
-    path::Path,
-    sync::Arc,
-};
+use std::{fs::OpenOptions, io, path::Path, sync::Arc};
 
-use super::DeviceAdaptor;
+use crate::ring::traits::DeviceAdaptor;
 
 const BAR_INDEX: usize = 0;
 const BAR_MAP_RANGE_END: u64 = 4096;
@@ -131,7 +126,10 @@ impl DeviceAdaptor for SysfsPciCsrAdaptor {
         unsafe {
             let ptr = bar.as_ptr().add(addr);
             let ret = ptr.cast::<u32>().read_volatile();
-            debug!("read csr: addr=0x{:x}, bar_offset=0x{:x}, val=0x{:x}", ptr as usize, addr, ret);
+            debug!(
+                "read csr: addr=0x{:x}, bar_offset=0x{:x}, val=0x{:x}",
+                ptr as usize, addr, ret
+            );
             Ok(ret)
         }
     }
@@ -147,7 +145,10 @@ impl DeviceAdaptor for SysfsPciCsrAdaptor {
         let mut bar = self.bar.lock();
         unsafe {
             let ptr = bar.as_mut_ptr().add(addr);
-            debug!("write csr: addr=0x{:x}, bar_offset=0x{:x}, val=0x{:x}", ptr as usize, addr, data);
+            debug!(
+                "write csr: addr=0x{:x}, bar_offset=0x{:x}, val=0x{:x}",
+                ptr as usize, addr, data
+            );
             ptr.cast::<u32>().write_volatile(data);
         }
 

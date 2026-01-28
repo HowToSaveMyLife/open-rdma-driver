@@ -19,7 +19,7 @@ pub(crate) use send::*;
 
 use bilge::prelude::*;
 
-use crate::ringbuf::{DescDeserialize, DescSerialize};
+use crate::ring::traits::{DescDeserialize, DescSerialize};
 use crate::workers::send::WorkReqOpCode;
 
 /// Size of a descriptor in bytes.

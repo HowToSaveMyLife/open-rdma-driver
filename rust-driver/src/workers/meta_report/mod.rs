@@ -3,13 +3,17 @@ mod worker;
 
 use std::io;
 
-use types::{MetaReportQueue, MetaReportQueueCtx, MetaReportQueueHandler};
+use types::MetaReportQueueHandler;
 use worker::{MetaHandler, MetaWorker};
 
 use crate::{
-    csr::{build_meta_report_rings, mode::Mode, DeviceAdaptor},
     mem::DmaBuf,
-    ringbuf::DescRingBuffer,
+    ring::{
+        buffer::{desc_ring::DmaBuffer, ConsumerRingDefault},
+        csr::mode::Mode,
+        spec::build_meta_report_rings,
+        traits::DeviceAdaptor,
+    },
     workers::{
         ack_responder::AckResponse,
         completion::CompletionTask,
@@ -38,14 +42,15 @@ where
     Dev: Clone + DeviceAdaptor + Send + 'static,
 {
     let mrq_rings = build_meta_report_rings(dev.clone(), mode);
-    for (ring, page) in mrq_rings.iter().zip(pages.iter()) {
-        ring.write_base_addr(page.phys_addr)?;
-    }
-    let ctxs: Vec<_> = pages
+    // for (ring, page) in mrq_rings.iter().zip(pages.iter()) {
+    //     ring.write_base_addr(page.phys_addr)?;
+    // }
+
+    let ctxs = pages
         .into_iter()
-        .map(|p| MetaReportQueue::new(DescRingBuffer::new(p.buf)))
+        .map(|p| DmaBuffer::new(p))
         .zip(mrq_rings)
-        .map(|(q, ring)| MetaReportQueueCtx::new(q, ring))
+        .map(|(q, ring)| ConsumerRingDefault::new(q, ring).unwrap())
         .collect();
 
     let handler = MetaHandler::new(

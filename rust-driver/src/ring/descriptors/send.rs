@@ -2,10 +2,12 @@ use bilge::prelude::*;
 
 use crate::{
     impl_desc_serde,
-    ringbuf::{DescDeserialize, DescSerialize},
+    ring::traits::ToRingBytes,
     types::{RemoteAddr, VirtAddr},
     workers::send::WorkReqOpCode,
 };
+
+use crate::ring::traits::{DescDeserialize, DescSerialize};
 
 use super::RingBufDescCommonHead;
 
@@ -367,3 +369,23 @@ impl SendQueueReqDescSeg1 {
 }
 
 impl_desc_serde!(SendQueueReqDescSeg0, SendQueueReqDescSeg1);
+
+/// Send queue descriptor types that can be submitted
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum SendQueueDesc {
+    /// First segment
+    Seg0(SendQueueReqDescSeg0),
+    /// Second segment
+    Seg1(SendQueueReqDescSeg1),
+}
+
+impl ToRingBytes for SendQueueDesc {
+    type Bytes = [u8; 32];
+
+    fn to_bytes(&self) -> [u8; 32] {
+        match self {
+            Self::Seg0(s) => s.serialize(),
+            Self::Seg1(s) => s.serialize(),
+        }
+    }
+}

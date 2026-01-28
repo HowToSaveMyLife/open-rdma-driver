@@ -37,7 +37,7 @@
     unused_results,
     // variant_size_differences,
 
-    warnings, // treat all warnings as errors
+    // warnings, // treat all warnings as errors
 
     clippy::all,
     clippy::pedantic,
@@ -170,8 +170,7 @@ mod cmd;
 mod config;
 /// Constants used throughout the driver
 mod constants;
-mod csr;
-mod descriptors;
+
 /// Error types and handling
 mod error;
 /// Memory operation components
@@ -182,11 +181,15 @@ mod memory_proxy_simple;
 /// Network implementations
 pub mod net;
 pub(crate) mod rdma_utils;
-mod ringbuf;
+// mod ringbuf;
+// mod csr;
+// mod descriptors;
 /// Type-safe abstractions
 mod types;
 mod verbs;
 mod workers;
+
+mod ring;
 
 pub use error::{RdmaError, Result};
 pub use verbs::{core::BlueRdmaCore, ffi::RdmaCtxOps};

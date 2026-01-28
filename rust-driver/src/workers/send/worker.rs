@@ -3,13 +3,17 @@ use std::{iter, sync::Arc};
 use crossbeam_deque::{Steal, Stealer};
 
 use crate::{
-    descriptors::{SendQueueReqDescSeg0, SendQueueReqDescSeg1},
-    csr::{DeviceAdaptor, SendRing, WriterOps},
+    ring::{
+        buffer::ProducerRingDefault,
+        descriptors::send::{SendQueueDesc, SendQueueReqDescSeg0, SendQueueReqDescSeg1},
+        spec::SendRingSpec,
+        traits::DeviceAdaptor,
+    },
     workers::spawner::SingleThreadPollingWorker,
 };
 
 use super::{
-    types::{SendQueue, SendQueueDesc, WrInjector, WrStealer, WrWorker},
+    types::{WrInjector, WrStealer, WrWorker},
     WrChunk,
 };
 
@@ -28,48 +32,48 @@ impl SendHandle {
     }
 }
 
-pub(crate) struct SendQueueSync<Dev: DeviceAdaptor> {
-    /// Queue for submitting send requests to the NIC
-    send_queue: SendQueue,
-    /// CSR ring for accessing hardware registers
-    csr_ring: SendRing<Dev>,
-}
+// pub(crate) struct SendQueueSync<Dev: DeviceAdaptor> {
+//     /// Queue for submitting send requests to the NIC
+//     send_queue: SendQueue<Dev>,
+//     /// CSR ring for accessing hardware registers
+//     csr_ring: SendRingCsr<Dev>,
+// }
 
-impl<Dev: DeviceAdaptor> SendQueueSync<Dev> {
-    pub(crate) fn new(send_queue: SendQueue, csr_ring: SendRing<Dev>) -> Self {
-        Self {
-            send_queue,
-            csr_ring,
-        }
-    }
+// impl<Dev: DeviceAdaptor> SendQueueSync<Dev> {
+//     pub(crate) fn new(send_queue: SendQueue<Dev>, csr_ring: SendRingCsr<Dev>) -> Self {
+//         Self {
+//             send_queue,
+//             csr_ring,
+//         }
+//     }
 
-    fn send(&mut self, descs: Vec<SendQueueDesc>) -> bool {
-        if self.send_queue.remaining() < descs.len() {
-            self.sync_tail();
-        }
-        if self.send_queue.remaining() < descs.len() {
-            return false;
-        }
-        for desc in descs {
-            assert!(self.send_queue.push(desc), "full send queue");
-        }
-        true
-    }
+//     fn send(&mut self, descs: Vec<SendQueueDesc>) -> bool {
+//         if self.send_queue.remaining() < descs.len() {
+//             self.sync_tail();
+//         }
+//         if self.send_queue.remaining() < descs.len() {
+//             return false;
+//         }
+//         for desc in descs {
+//             assert!(self.send_queue.push(desc), "full send queue");
+//         }
+//         true
+//     }
 
-    fn sync_head(&self) {
-        self.csr_ring
-            .write_head(self.send_queue.head())
-            .expect("failed to write head csr");
-    }
+//     fn sync_head(&self) {
+//         self.csr_ring
+//             .write_head(self.send_queue.head())
+//             .expect("failed to write head csr");
+//     }
 
-    fn sync_tail(&mut self) {
-        let tail_ptr = self
-            .csr_ring
-            .read_tail()
-            .expect("failed to read tail csr");
-        self.send_queue.set_tail(tail_ptr);
-    }
-}
+//     fn sync_tail(&mut self) {
+//         let tail_ptr = self
+//             .csr_ring
+//             .read_tail()
+//             .expect("failed to read tail csr");
+//         self.send_queue.set_tail(tail_ptr);
+//     }
+// }
 
 /// Worker thread for processing send work requests
 pub(crate) struct SendWorker<Dev: DeviceAdaptor> {
@@ -81,7 +85,7 @@ pub(crate) struct SendWorker<Dev: DeviceAdaptor> {
     global: Arc<WrInjector>,
     /// Work stealers for taking work from other workers
     remotes: Box<[WrStealer]>,
-    sq: SendQueueSync<Dev>,
+    sq: ProducerRingDefault<Dev, SendRingSpec>,
 }
 
 impl<Dev: DeviceAdaptor> SendWorker<Dev> {
@@ -90,7 +94,7 @@ impl<Dev: DeviceAdaptor> SendWorker<Dev> {
         local: WrWorker,
         global: Arc<WrInjector>,
         remotes: Box<[WrStealer]>,
-        sq: SendQueueSync<Dev>,
+        sq: ProducerRingDefault<Dev, SendRingSpec>,
     ) -> Self {
         Self {
             id,
@@ -127,16 +131,15 @@ impl<Dev: DeviceAdaptor + Send + 'static> SingleThreadPollingWorker for SendWork
             });
             ret_val.push(wqe);
         }
-        
+
         Some(ret_val)
     }
 
     fn process(&mut self, wrs: Self::Task) {
-        let mut has_new_desc = false;
-        for wr in wrs{
+        for wr in wrs {
             if let Some(wr) = wr {
                 let fst = SendQueueReqDescSeg0::new(
-            wr.opcode,
+                    wr.opcode,
                     wr.msn,
                     wr.psn.into_inner(),
                     wr.qp_type,
@@ -162,15 +165,12 @@ impl<Dev: DeviceAdaptor + Send + 'static> SingleThreadPollingWorker for SendWork
                     wr.laddr,
                 );
                 let descs = vec![SendQueueDesc::Seg0(fst), SendQueueDesc::Seg1(snd)];
-                if !self.sq.send(descs) {
+
+                // TODO 需要能够一次性 push 多个，这样可以防止多次读取和写入csr寄存器，需要结合 @open-rdma-driver/rust-driver/src/ring/traits.rs#L40  trait的优化
+                if !self.sq.try_push_atomic(&descs).unwrap() {
                     self.local.push(wr);
-                } else {
-                    has_new_desc = true;
                 }
             }
-        }
-        if has_new_desc {
-            self.sq.sync_head();
         }
     }
 }

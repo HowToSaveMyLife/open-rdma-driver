@@ -1,10 +1,7 @@
 use bilge::prelude::*;
 
-use crate::{
-    impl_desc_serde,
-    ringbuf::{DescDeserialize, DescSerialize},
-    types::PhysAddr,
-};
+use crate::ring::traits::{DescDeserialize, DescSerialize, FromRingBytes, ToRingBytes};
+use crate::{impl_desc_serde, types::PhysAddr};
 
 use super::RingBufDescCommonHead;
 
@@ -125,3 +122,33 @@ impl SimpleNicRxQueueDesc {
 }
 
 impl_desc_serde!(SimpleNicTxQueueDesc, SimpleNicRxQueueDesc);
+
+impl ToRingBytes for SimpleNicTxQueueDesc {
+    type Bytes = [u8; 32];
+
+    fn to_bytes(&self) -> [u8; 32] {
+        self.serialize()
+    }
+}
+
+impl FromRingBytes for SimpleNicRxQueueDesc {
+    type Bytes = [u8; 32];
+
+    fn from_bytes(bytes: &[Self::Bytes]) -> Option<Self> {
+        match bytes.len() {
+            0 => None,
+            1 => Some(DescDeserialize::deserialize(bytes[0])),
+            _ => unreachable!(),
+        }
+    }
+
+    fn is_valid(bytes: &Self::Bytes) -> bool {
+        // Valid bit is bit 7 of byte 31
+        bytes[31] >> 7 == 1
+    }
+
+    fn has_next(bytes: &Self::Bytes) -> bool {
+        // do not has next
+        false
+    }
+}

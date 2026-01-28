@@ -13,7 +13,6 @@ use std::{
     ptr,
 };
 
-
 /// A trait for allocating contiguous physical memory pages.
 ///
 /// The generic parameter `N` specifies the number of contiguous pages to allocate.

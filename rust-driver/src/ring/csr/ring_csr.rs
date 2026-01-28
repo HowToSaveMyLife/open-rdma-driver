@@ -56,22 +56,9 @@ use super::constants::{
     RING_OFFSET_BASE_HIGH, RING_OFFSET_BASE_LOW, RING_OFFSET_HEAD, RING_OFFSET_TAIL,
 };
 
-/// Abstraction over low-level CSR access.
-pub(crate) trait DeviceAdaptor: Clone {
-    fn read_csr(&self, addr: usize) -> io::Result<u32>;
-    fn write_csr(&self, addr: usize, data: u32) -> io::Result<()>;
-}
+use crate::ring::traits::{DeviceAdaptor, RingSpec, RingSpecToCard, RingSpecToHost};
 
-/// Compile-time description of a ring.
-pub(crate) trait RingSpec {
-    
-    fn csr_base(&self) -> usize;
-}
-
-pub(crate) trait RingSpecToHost: RingSpec {}
-pub(crate) trait RingSpecToCard: RingSpec {}
-
-pub(crate) struct Ring<Dev, Spec>
+pub(crate) struct RingCsr<Dev, Spec>
 where
     Dev: DeviceAdaptor,
     Spec: RingSpec,
@@ -80,7 +67,7 @@ where
     spec: Spec,
 }
 
-impl<Dev: DeviceAdaptor, Spec: RingSpec> Ring<Dev, Spec> {
+impl<Dev: DeviceAdaptor, Spec: RingSpec> RingCsr<Dev, Spec> {
     /// Create a new ring with the given device and specification
     #[inline]
     pub(crate) fn new(dev: Dev, spec: Spec) -> Self {
@@ -126,7 +113,7 @@ pub(crate) trait ReaderOps {
 }
 
 /// Implement writer operations for ToCard rings (host produces, card consumes)
-impl<Dev: DeviceAdaptor, Spec: RingSpecToCard> WriterOps for Ring<Dev, Spec> {
+impl<Dev: DeviceAdaptor, Spec: RingSpecToCard> WriterOps for RingCsr<Dev, Spec> {
     #[inline]
     fn write_head(&self, head: u32) -> io::Result<()> {
         self.dev
@@ -140,7 +127,7 @@ impl<Dev: DeviceAdaptor, Spec: RingSpecToCard> WriterOps for Ring<Dev, Spec> {
 }
 
 /// Implement reader operations for ToHost rings (card produces, host consumes)
-impl<Dev: DeviceAdaptor, Spec: RingSpecToHost> ReaderOps for Ring<Dev, Spec> {
+impl<Dev: DeviceAdaptor, Spec: RingSpecToHost> ReaderOps for RingCsr<Dev, Spec> {
     #[inline]
     fn read_head(&self) -> io::Result<u32> {
         self.dev.read_csr(self.spec.csr_base() + RING_OFFSET_HEAD)

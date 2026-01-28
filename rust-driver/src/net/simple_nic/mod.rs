@@ -4,7 +4,7 @@ mod route;
 /// worker handling NIC frames
 mod worker;
 
-mod types;
+// mod types;
 
 #[cfg(test)]
 mod tests;

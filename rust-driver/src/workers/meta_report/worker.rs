@@ -1,13 +1,13 @@
 use log::{debug, error};
 
 use crate::{
-    csr::DeviceAdaptor,
     rdma_utils::{
         psn::Psn,
         psn_tracker::{LocalAckTracker, RemoteAckTracker},
         qp::QpTable,
         types::{SendWrBase, SendWrRdma},
     },
+    ring::traits::DeviceAdaptor,
     types::{RemoteAddr, VirtAddr},
     workers::{
         ack_responder::AckResponse,

@@ -364,6 +364,7 @@ impl SimpleMemoryProxyClient {
 
         let mut data = Vec::with_capacity(req.length);
 
+        // TODO 可能需要加上 fence！！！！！
         for i in 0..req.length {
             unsafe {
                 let byte = vir_addr.add(i).read_volatile();

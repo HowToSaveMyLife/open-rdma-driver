@@ -6,7 +6,6 @@ use crate::{
     cmd::{CommandConfigurator, MttUpdate, PgtUpdate, RecvBufferMeta, UpdateQp},
     config::DeviceConfig,
     constants::CARD_MAC_ADDRESS,
-    csr::{mode::Mode, DeviceAdaptor},
     mem::{
         get_num_page, virt_to_phy::AddressResolver, DmaBuf, DmaBufAllocator, UmemHandler, PAGE_SIZE,
     },
@@ -30,7 +29,9 @@ use crate::{
             QpAttr, RecvWr, SendWr, SendWrRdma,
         },
     },
-    ringbuf::DescRingBufAllocator,
+    ring::buffer::DefaultDescRingBufAllocator,
+    ring::csr::mode::Mode,
+    ring::traits::DeviceAdaptor,
     types::{RemoteAddr, VirtAddr},
     workers::{
         ack_responder::AckResponder,
@@ -105,7 +106,7 @@ where
         let adaptor = device.new_adaptor()?;
         debug!("device adaptor initialized...");
         let mut allocator = device.new_dma_buf_allocator()?;
-        let mut rb_allocator = DescRingBufAllocator::new(&mut allocator);
+        let mut rb_allocator = DefaultDescRingBufAllocator::new(&mut allocator);
         let cmd_controller =
             CommandConfigurator::init(&adaptor, rb_allocator.alloc()?, rb_allocator.alloc()?)?;
         debug!("command queue request controller initialized...");

@@ -1,38 +1,34 @@
-
 use log::debug;
 
 use crate::{
-    csr::{DeviceAdaptor, MetaReportRing, ReaderOps},
-    descriptors::{
-        MetaReportQueueAckDesc, MetaReportQueueAckExtraDesc, MetaReportQueueDescFirst,
-        MetaReportQueueDescNext, MetaReportQueuePacketBasicInfoDesc,
-        MetaReportQueueReadReqExtendInfoDesc,
-    },
     rdma_utils::psn::Psn,
-    ringbuf::DescRingBuffer,
+    ring::{
+        buffer::ConsumerRingDefault, descriptors::MetaReportQueueDesc, spec::MetaReportRingSpec,
+        traits::DeviceAdaptor,
+    },
 };
 
-pub(crate) struct MetaReportQueueCtx<Dev: DeviceAdaptor> {
-    queue: MetaReportQueue,
-    ring: MetaReportRing<Dev>,
-}
+// pub(crate) struct MetaReportQueueCtx<Dev: DeviceAdaptor> {
+//     queue: MetaReportQueue,
+//     ring: MetaReportRing<Dev>,
+// }
 
-impl<Dev: DeviceAdaptor> MetaReportQueueCtx<Dev> {
-    pub(crate) fn new(queue: MetaReportQueue, ring: MetaReportRing<Dev>) -> Self {
-        Self { queue, ring }
-    }
-}
+// impl<Dev: DeviceAdaptor> MetaReportQueueCtx<Dev> {
+//     pub(crate) fn new(queue: MetaReportQueue, ring: MetaReportRing<Dev>) -> Self {
+//         Self { queue, ring }
+//     }
+// }
 
 /// Handler for meta report queues
 pub(crate) struct MetaReportQueueHandler<Dev: DeviceAdaptor> {
     /// All four meta report queues
-    inner: Vec<MetaReportQueueCtx<Dev>>,
+    inner: Vec<ConsumerRingDefault<Dev, MetaReportRingSpec>>,
     /// Current position, used for round robin polling
     pos: usize,
 }
 
 impl<Dev: DeviceAdaptor> MetaReportQueueHandler<Dev> {
-    pub(crate) fn new(inner: Vec<MetaReportQueueCtx<Dev>>) -> Self {
+    pub(crate) fn new(inner: Vec<ConsumerRingDefault<Dev, MetaReportRingSpec>>) -> Self {
         Self { inner, pos: 0 }
     }
 
@@ -49,14 +45,12 @@ impl<Dev: DeviceAdaptor> MetaReportQueueHandler<Dev> {
         let num_queues = self.inner.len();
         for i in 0..num_queues {
             let idx = (self.pos + i) % num_queues;
-            let ctx = &mut self.inner[idx];
-            let Some(desc) = ctx.queue.pop() else {
+            let ring = &mut self.inner[idx];
+
+            // 直接调用 try_pop()，内部自动处理 CSR 同步
+            let Some(desc) = ring.try_pop().unwrap() else {
                 continue;
             };
-            let _ignore = ctx.ring.write_tail(ctx.queue.tail());
-            if let Ok(head_ptr) = ctx.ring.read_head() {
-                ctx.queue.set_head(head_ptr);
-            }
 
             self.pos = (idx + 1) % num_queues;
             let meta = match desc {
@@ -139,74 +133,23 @@ impl<Dev: DeviceAdaptor> MetaReportQueueHandler<Dev> {
 }
 
 /// Meta report queue descriptors
-pub(crate) enum MetaReportQueueDesc {
-    /// Packet info for write operations
-    WritePacketInfo(MetaReportQueuePacketBasicInfoDesc),
-    /// Packet info for read operations
-    ReadPacketInfo(
-        (
-            MetaReportQueuePacketBasicInfoDesc,
-            MetaReportQueueReadReqExtendInfoDesc,
-        ),
-    ),
-    /// Packet info for congestion event
-    CnpPacketInfo(MetaReportQueuePacketBasicInfoDesc),
-    /// Ack
-    Ack(MetaReportQueueAckDesc),
-    /// Nak
-    Nak((MetaReportQueueAckDesc, MetaReportQueueAckExtraDesc)),
-}
-
-/// A transmit queue for the simple NIC device.
-pub(crate) struct MetaReportQueue {
-    /// Inner ring buffer
-    inner: DescRingBuffer,
-}
-
-impl MetaReportQueue {
-    pub(crate) fn new(inner: DescRingBuffer) -> Self {
-        Self { inner }
-    }
-
-    /// Tries to poll next valid entry from the queue
-    pub(crate) fn pop(&mut self) -> Option<MetaReportQueueDesc> {
-        let (first, next) = self.inner.pop_two();
-        #[allow(clippy::wildcard_enum_match_arm)] // too verbose
-        match (first, next) {
-            (None, None) => None,
-            (Some(MetaReportQueueDescFirst::PacketInfo(d)), None) if d.ecn_marked() => {
-                Some(MetaReportQueueDesc::CnpPacketInfo(d))
-            }
-            (Some(MetaReportQueueDescFirst::PacketInfo(d)), None) => {
-                Some(MetaReportQueueDesc::WritePacketInfo(d))
-            }
-            (Some(MetaReportQueueDescFirst::Ack(d)), None) => Some(MetaReportQueueDesc::Ack(d)),
-            (
-                Some(MetaReportQueueDescFirst::PacketInfo(f)),
-                Some(MetaReportQueueDescNext::ReadInfo(n)),
-            ) => Some(MetaReportQueueDesc::ReadPacketInfo((f, n))),
-            (
-                Some(MetaReportQueueDescFirst::Ack(f)),
-                Some(MetaReportQueueDescNext::AckExtra(n)),
-            ) => Some(MetaReportQueueDesc::Nak((f, n))),
-            _ => {
-                unreachable!("invalid descriptor format")
-            }
-        }
-    }
-
-    pub(crate) fn tail(&self) -> u32 {
-        self.inner.tail() as u32
-    }
-
-    pub(crate) fn set_head(&mut self, head: u32) {
-        self.inner.set_head(head);
-    }
-
-    pub(crate) fn remaining(&self) -> usize {
-        self.inner.remaining()
-    }
-}
+// pub(crate) enum MetaReportQueueDesc {
+//     /// Packet info for write operations
+//     WritePacketInfo(MetaReportQueuePacketBasicInfoDesc),
+//     /// Packet info for read operations
+//     ReadPacketInfo(
+//         (
+//             MetaReportQueuePacketBasicInfoDesc,
+//             MetaReportQueueReadReqExtendInfoDesc,
+//         ),
+//     ),
+//     /// Packet info for congestion event
+//     CnpPacketInfo(MetaReportQueuePacketBasicInfoDesc),
+//     /// Ack
+//     Ack(MetaReportQueueAckDesc),
+//     /// Nak
+//     Nak((MetaReportQueueAckDesc, MetaReportQueueAckExtraDesc)),
+// }
 
 /// The position of a packet
 #[derive(Debug, Clone, Copy)]

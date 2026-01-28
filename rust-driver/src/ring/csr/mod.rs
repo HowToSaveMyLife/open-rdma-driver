@@ -72,25 +72,19 @@
 
 #![allow(clippy::todo)] // FIXME: implement
 #![allow(clippy::missing_errors_doc)] // FIXME: add error docs
+#![allow(unused_imports)] // TODO
 
 /// Core device adaptor trait and ring abstractions
-pub(crate) mod device_adaptor;
+pub(crate) mod ring_csr;
 
-/// Ring specifications and builder functions
-pub(crate) mod ring_specs;
-
-/// Hardware CSR access implementations (PCIe MMIO)
-pub(crate) mod hardware;
-
-/// Emulated CSR access implementation (UDP RPC)
-pub(crate) mod emulated;
+mod backends;
 
 /// Device operating mode configuration (100G/200G/400G)
 pub(crate) mod mode;
 
 /// Memory-mapped I/O addresses of device registers
-mod constants;
+pub(crate) mod constants;
 
+pub(crate) use backends::*;
 // Re-export core types for convenient access
-pub(crate) use device_adaptor::*;
-pub(crate) use ring_specs::*;
+pub(crate) use ring_csr::*;

@@ -1,12 +1,16 @@
 use std::{io, iter, sync::Arc};
 
 use types::{WrInjector, WrWorker};
-use worker::{SendQueueSync, SendWorker};
+use worker::SendWorker;
 
 use crate::{
-    csr::{build_send_rings, mode::Mode, DeviceAdaptor},
     mem::DmaBuf,
-    ringbuf::DescRingBuffer,
+    ring::{
+        buffer::{desc_ring::DmaBuffer, ProducerRingDefault},
+        csr::mode::Mode,
+        spec::build_send_rings,
+        traits::DeviceAdaptor,
+    },
     workers::spawner::{AbortSignal, SingleThreadPollingWorker},
 };
 
@@ -28,22 +32,26 @@ where
     let injector = Arc::new(WrInjector::new());
     let handle = SendHandle::new(Arc::clone(&injector));
     let sq_rings = build_send_rings(dev.clone(), mode);
-    for (ring, buf) in sq_rings.iter().zip(bufs.iter()) {
-        ring.write_base_addr(buf.phys_addr)?;
-    }
-    let send_queues: Vec<_> = bufs
+
+    let producer_rings = bufs
         .into_iter()
-        .map(|p| SendQueue::new(DescRingBuffer::new(p.buf)))
-        .collect();
+        .map(|p| DmaBuffer::new(p))
+        .zip(sq_rings)
+        .map(|(q, ring)| ProducerRingDefault::new(q, ring).unwrap());
+
+    // let send_queues: Vec<_> = bufs
+    //     .into_iter()
+    //     .map(|p| SendQueue::new(DescRingBuffer::new(p.buf)))
+    //     .collect();
     let workers: Vec<_> = iter::repeat_with(WrWorker::new_fifo)
-        .take(send_queues.len())
+        .take(producer_rings.len())
         .collect();
     let stealers: Vec<_> = workers.iter().map(WrWorker::stealer).collect();
-    let sqs = send_queues
-        .into_iter()
-        .zip(sq_rings)
-        .map(|(sq, ring)| SendQueueSync::new(sq, ring));
-    for (id, (local, sq)) in workers.into_iter().zip(sqs).enumerate() {
+    // let sqs = send_queues
+    //     .into_iter()
+    //     .zip(sq_rings)
+    //     .map(|(sq, ring)| SendQueueSync::new(sq, ring));
+    for (id, (local, sq)) in workers.into_iter().zip(producer_rings).enumerate() {
         let worker = SendWorker::new(
             id,
             local,

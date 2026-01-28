@@ -1,39 +1,32 @@
-use log::debug;
-use std::{
-    io,
-    net::Ipv4Addr,
-};
+use std::{io, net::Ipv4Addr};
 
 use parking_lot::Mutex;
 
 use crate::{
     constants::CARD_MAC_ADDRESS,
-    csr::{
-        cmd_req_ring, cmd_resp_ring, CmdReqRing, CmdRespRing, DeviceAdaptor, ReaderOps, WriterOps,
-    },
-    descriptors::{
-        cmd::{CmdQueueReqDescUpdateMrTable, CmdQueueReqDescUpdatePGT},
-        CmdQueueReqDescQpManagement, CmdQueueReqDescSetNetworkParam,
-        CmdQueueReqDescSetRawPacketReceiveMeta,
-    },
     mem::DmaBuf,
     net::config::NetworkConfig,
-    ringbuf::DescRingBuffer,
+    ring::{
+        buffer::{desc_ring::DmaBuffer, ConsumerRingDefault, ProducerRingDefault},
+        descriptors::cmd::CmdQueueDesc,
+        spec::{cmd_req_ring, cmd_resp_ring, CmdReqSpec, CmdRespSpec},
+        traits::DeviceAdaptor,
+    },
 };
 
 use super::{
-    types::{CmdQueue, CmdQueueDesc, CmdRespQueue},
+    types::{
+        CmdQueueReqDescQpManagement, CmdQueueReqDescSetNetworkParam,
+        CmdQueueReqDescSetRawPacketReceiveMeta, CmdQueueReqDescUpdateMrTable,
+        CmdQueueReqDescUpdatePGT,
+    },
     MttUpdate, PgtUpdate, RecvBufferMeta, UpdateQp,
 };
 
 /// Controller of the command queue
 pub(crate) struct CommandConfigurator<Dev: DeviceAdaptor> {
     /// Command queue pair
-    cmd_qp: Mutex<CmdQp>,
-    /// Ring for accessing command queue CSRs
-    req_csr_ring: CmdReqRing<Dev>,
-    /// Ring for accessing command response queue CSRs
-    resp_csr_ring: CmdRespRing<Dev>,
+    cmd_qp: Mutex<CmdQp<Dev>>,
 }
 
 impl<Dev: DeviceAdaptor> CommandConfigurator<Dev> {
@@ -42,30 +35,14 @@ impl<Dev: DeviceAdaptor> CommandConfigurator<Dev> {
     /// # Returns
     /// A new `CommandConfigurator` with an initialized command queue
     pub(crate) fn init(dev: &Dev, req_buf: DmaBuf, resp_buf: DmaBuf) -> io::Result<Self> {
-        let req_queue = CmdQueue::new(DescRingBuffer::new(req_buf.buf));
-        let resp_queue = CmdRespQueue::new(DescRingBuffer::new(resp_buf.buf));
         let req_csr_ring = cmd_req_ring(dev.clone());
         let resp_csr_ring = cmd_resp_ring(dev.clone());
-        debug!("cmd req queue pa = 0x{:x}", req_buf.phys_addr);
-        req_csr_ring.write_base_addr(req_buf.phys_addr)?;
-        debug!("cmd resp queue pa = 0x{:x}", resp_buf.phys_addr);
-        resp_csr_ring.write_base_addr(resp_buf.phys_addr)?;
+        let tx_ring = ProducerRingDefault::new(DmaBuffer::new(req_buf), req_csr_ring).unwrap();
+        let rx_ring = ConsumerRingDefault::new(DmaBuffer::new(resp_buf), resp_csr_ring).unwrap();
 
         Ok(Self {
-            cmd_qp: Mutex::new(CmdQp::new(req_queue, resp_queue)),
-            req_csr_ring,
-            resp_csr_ring,
+            cmd_qp: Mutex::new(CmdQp::new(tx_ring, rx_ring)),
         })
-    }
-
-    /// Flush cmd request queue pointer to device
-    pub(crate) fn flush_req_queue(&self, req_queue: &CmdQueue) -> io::Result<()> {
-        self.req_csr_ring.write_head(req_queue.head())
-    }
-
-    /// Flush cmd response queue pointer to device
-    pub(crate) fn flush_resp_queue(&self, resp_queue: &CmdRespQueue) -> io::Result<()> {
-        self.resp_csr_ring.write_tail(resp_queue.tail())
     }
 }
 
@@ -83,8 +60,8 @@ impl<Dev: DeviceAdaptor> CommandConfigurator<Dev> {
         let mut qp = self.cmd_qp.lock();
         let mut qp_update = qp.update();
         qp_update.push(CmdQueueDesc::UpdateMrTable(update_mr_table));
-        qp_update.flush(&self.req_csr_ring);
-        qp_update.wait(&self.resp_csr_ring);
+        // qp_update.flush(&self.req_csr_ring);
+        qp_update.wait();
     }
 
     pub(crate) fn update_pgt(&self, update: PgtUpdate) {
@@ -97,8 +74,8 @@ impl<Dev: DeviceAdaptor> CommandConfigurator<Dev> {
         let mut qp = self.cmd_qp.lock();
         let mut qp_update = qp.update();
         qp_update.push(CmdQueueDesc::UpdatePGT(desc));
-        qp_update.flush(&self.req_csr_ring);
-        qp_update.wait(&self.resp_csr_ring);
+        // qp_update.flush(&self.req_csr_ring);
+        qp_update.wait();
     }
 
     pub(crate) fn update_qp(&self, entry: UpdateQp) {
@@ -119,8 +96,8 @@ impl<Dev: DeviceAdaptor> CommandConfigurator<Dev> {
         let mut qp = self.cmd_qp.lock();
         let mut update = qp.update();
         update.push(CmdQueueDesc::ManageQP(desc));
-        update.flush(&self.req_csr_ring);
-        update.wait(&self.resp_csr_ring);
+        // update.flush(&self.req_csr_ring);
+        update.wait();
     }
 
     pub(crate) fn set_network(&self, param: NetworkConfig) {
@@ -134,8 +111,8 @@ impl<Dev: DeviceAdaptor> CommandConfigurator<Dev> {
         let mut qp = self.cmd_qp.lock();
         let mut update = qp.update();
         update.push(CmdQueueDesc::SetNetworkParam(desc));
-        update.flush(&self.req_csr_ring);
-        update.wait(&self.resp_csr_ring);
+        // update.flush(&self.req_csr_ring);
+        update.wait();
     }
 
     pub(crate) fn set_raw_packet_recv_buffer(&self, meta: RecvBufferMeta) {
@@ -143,22 +120,25 @@ impl<Dev: DeviceAdaptor> CommandConfigurator<Dev> {
         let mut qp = self.cmd_qp.lock();
         let mut update = qp.update();
         update.push(CmdQueueDesc::SetRawPacketReceiveMeta(desc));
-        update.flush(&self.req_csr_ring);
-        update.wait(&self.resp_csr_ring);
+        // update.flush(&self.req_csr_ring);
+        update.wait();
     }
 }
 
 /// Command queue pair
-struct CmdQp {
+struct CmdQp<Dev: DeviceAdaptor> {
     /// The command request queue
-    req_queue: CmdQueue,
+    req_queue: ProducerRingDefault<Dev, CmdReqSpec>,
     /// The command response queue
-    resp_queue: CmdRespQueue,
+    resp_queue: ConsumerRingDefault<Dev, CmdRespSpec>,
 }
 
-impl CmdQp {
+impl<Dev: DeviceAdaptor> CmdQp<Dev> {
     /// Creates a new command queue pair
-    fn new(req_queue: CmdQueue, resp_queue: CmdRespQueue) -> Self {
+    fn new(
+        req_queue: ProducerRingDefault<Dev, CmdReqSpec>,
+        resp_queue: ConsumerRingDefault<Dev, CmdRespSpec>,
+    ) -> Self {
         Self {
             req_queue,
             resp_queue,
@@ -166,7 +146,7 @@ impl CmdQp {
     }
 
     /// Creates a queue pair update handle to process commands
-    fn update(&mut self) -> QpUpdate<'_> {
+    fn update(&mut self) -> QpUpdate<'_, Dev> {
         QpUpdate {
             num: 0,
             req_queue: &mut self.req_queue,
@@ -176,40 +156,35 @@ impl CmdQp {
 }
 
 /// An updates handle
-struct QpUpdate<'a> {
+struct QpUpdate<'a, Dev: DeviceAdaptor> {
     /// Number of updates
     num: usize,
     /// The command request queue
-    req_queue: &'a mut CmdQueue,
+    req_queue: &'a mut ProducerRingDefault<Dev, CmdReqSpec>,
     /// The command response queue
-    resp_queue: &'a mut CmdRespQueue,
+    resp_queue: &'a mut ConsumerRingDefault<Dev, CmdRespSpec>,
 }
 
-impl QpUpdate<'_> {
+impl<Dev: DeviceAdaptor> QpUpdate<'_, Dev> {
     /// Pushes a new command queue descriptor to the queue.
     fn push(&mut self, desc: CmdQueueDesc) {
         self.num = self.num.wrapping_add(1);
         //FIXME: handle failed condition
-        let _ignore = self.req_queue.push(desc);
+        let result = self.req_queue.try_push_atomic(&[desc]).unwrap();
+        assert!(result, "failed to push command descriptor");
     }
 
-    /// Flushes the command queue by writing the head pointer to the CSR ring.
-    fn flush<Dev: DeviceAdaptor>(&mut self, req_csr_ring: &CmdReqRing<Dev>) {
-        let _ = req_csr_ring.write_head(self.req_queue.head());
-        if let Ok(tail_ptr) = req_csr_ring.read_tail() {
-            self.req_queue.set_tail(tail_ptr);
-        }
-    }
+    // /// Flushes the command queue by writing the head pointer to the CSR ring.
+    // fn flush(&mut self, req_csr_ring: &CmdReqRingCsr<Dev>) {
+    //     let _ = req_csr_ring.write_head(self.req_queue.head());
+    // }
 
     /// Waits for responses to all pushed commands.
-    fn wait<Dev: DeviceAdaptor>(mut self, resp_csr_ring: &CmdRespRing<Dev>) {
+    fn wait(mut self) {
         while self.num != 0 {
-            if let Some(_resp) = self.resp_queue.try_pop() {
+            // TODO : 不应该自旋阻塞
+            if let Some(_resp) = self.resp_queue.try_pop().unwrap() {
                 self.num = self.num.wrapping_sub(1);
-                let _ = resp_csr_ring.write_tail(self.resp_queue.tail());
-                if let Ok(head_ptr) = resp_csr_ring.read_head() {
-                    self.resp_queue.set_head(head_ptr);
-                }
             }
         }
     }

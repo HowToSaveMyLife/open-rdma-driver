@@ -1,10 +1,8 @@
 use bilge::prelude::*;
 
+use crate::impl_desc_serde;
+use crate::ring::traits::{DescDeserialize, DescSerialize, FromRingBytes};
 use crate::workers::meta_report::{HeaderType, PacketPos};
-use crate::{
-    impl_desc_serde,
-    ringbuf::{DescDeserialize, DescSerialize},
-};
 
 use super::RingBufDescCommonHead;
 
@@ -597,3 +595,65 @@ impl_desc_serde!(
     MetaReportQueueAckDesc,
     MetaReportQueueAckExtraDesc
 );
+
+pub(crate) enum MetaReportQueueDesc {
+    /// Packet info for write operations
+    WritePacketInfo(MetaReportQueuePacketBasicInfoDesc),
+    /// Packet info for read operations
+    ReadPacketInfo(
+        (
+            MetaReportQueuePacketBasicInfoDesc,
+            MetaReportQueueReadReqExtendInfoDesc,
+        ),
+    ),
+    /// Packet info for congestion event
+    CnpPacketInfo(MetaReportQueuePacketBasicInfoDesc),
+    /// Ack
+    Ack(MetaReportQueueAckDesc),
+    /// Nak
+    Nak((MetaReportQueueAckDesc, MetaReportQueueAckExtraDesc)),
+}
+
+impl FromRingBytes for MetaReportQueueDesc {
+    type Bytes = [u8; 32];
+
+    fn from_bytes(bytes: &[Self::Bytes]) -> Option<Self> {
+        assert!(bytes.len() <= 2);
+
+        let mut iter = bytes.into_iter().map(|a| *a); // TODO 使用 iter 防止拷贝
+        let first: Option<MetaReportQueueDescFirst> = iter.next().map(DescDeserialize::deserialize);
+        let next: Option<MetaReportQueueDescNext> = iter.next().map(DescDeserialize::deserialize);
+
+        match (first, next) {
+            (None, None) => None,
+            (Some(MetaReportQueueDescFirst::PacketInfo(d)), None) if d.ecn_marked() => {
+                Some(MetaReportQueueDesc::CnpPacketInfo(d))
+            }
+            (Some(MetaReportQueueDescFirst::PacketInfo(d)), None) => {
+                Some(MetaReportQueueDesc::WritePacketInfo(d))
+            }
+            (Some(MetaReportQueueDescFirst::Ack(d)), None) => Some(MetaReportQueueDesc::Ack(d)),
+            (
+                Some(MetaReportQueueDescFirst::PacketInfo(f)),
+                Some(MetaReportQueueDescNext::ReadInfo(n)),
+            ) => Some(MetaReportQueueDesc::ReadPacketInfo((f, n))),
+            (
+                Some(MetaReportQueueDescFirst::Ack(f)),
+                Some(MetaReportQueueDescNext::AckExtra(n)),
+            ) => Some(MetaReportQueueDesc::Nak((f, n))),
+            _ => {
+                unreachable!("invalid descriptor format")
+            }
+        }
+    }
+
+    fn is_valid(bytes: &Self::Bytes) -> bool {
+        // Valid bit is bit 7 of byte 31
+        bytes[31] >> 7 == 1
+    }
+
+    fn has_next(bytes: &Self::Bytes) -> bool {
+        // Has-next bit is bit 6 of byte 31
+        (bytes[31] >> 6) & 1 == 1
+    }
+}

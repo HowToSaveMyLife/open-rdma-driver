@@ -1,10 +1,11 @@
 use bilge::prelude::*;
 
 use crate::impl_desc_serde;
-use crate::ringbuf::{DescDeserialize, DescSerialize};
+use crate::ring::traits::{DescDeserialize, DescSerialize, FromRingBytes};
 use crate::types::{PhysAddr, VirtAddr};
 
 use super::RingBufDescCommonHead;
+use crate::ring::traits::ToRingBytes;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[repr(u8)]
@@ -608,3 +609,58 @@ impl_desc_serde!(
     CmdQueueReqDescSetNetworkParam,
     CmdQueueReqDescSetRawPacketReceiveMeta
 );
+
+/// Command queue descriptor types that can be submitted
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum CmdQueueDesc {
+    /// Update first stage table command
+    UpdateMrTable(CmdQueueReqDescUpdateMrTable),
+    /// Update second stage table command
+    UpdatePGT(CmdQueueReqDescUpdatePGT),
+    /// Manage Queue Pair operations
+    ManageQP(CmdQueueReqDescQpManagement),
+    /// Set network parameters
+    SetNetworkParam(CmdQueueReqDescSetNetworkParam),
+    /// Set metadata for raw packet receive operations
+    SetRawPacketReceiveMeta(CmdQueueReqDescSetRawPacketReceiveMeta),
+}
+
+impl ToRingBytes for CmdQueueDesc {
+    type Bytes = [u8; 32];
+
+    fn to_bytes(&self) -> [u8; 32] {
+        match self {
+            CmdQueueDesc::UpdateMrTable(desc) => desc.serialize(),
+            CmdQueueDesc::UpdatePGT(desc) => desc.serialize(),
+            CmdQueueDesc::ManageQP(desc) => desc.serialize(),
+            CmdQueueDesc::SetNetworkParam(desc) => desc.serialize(),
+            CmdQueueDesc::SetRawPacketReceiveMeta(desc) => desc.serialize(),
+        }
+    }
+}
+
+/// Command queue response descriptor type
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CmdRespQueueDesc([u8; 32]);
+
+impl FromRingBytes for CmdRespQueueDesc {
+    type Bytes = [u8; 32];
+
+    fn from_bytes(bytes: &[Self::Bytes]) -> Option<Self> {
+        match bytes.len() {
+            0 => None,
+            1 => Some(CmdRespQueueDesc(bytes[0])),
+            _ => unreachable!(),
+        }
+    }
+
+    fn is_valid(bytes: &Self::Bytes) -> bool {
+        // Valid bit is bit 7 of byte 31
+        bytes[31] >> 7 == 1
+    }
+
+    fn has_next(bytes: &Self::Bytes) -> bool {
+        // do not has next
+        false
+    }
+}

@@ -10,22 +10,20 @@ use std::{
 use log::error;
 
 use crate::{
-    csr::{
-        simple_nic_rx_ring, simple_nic_tx_ring, DeviceAdaptor, SimpleNicRxRing,
-        SimpleNicTxRing, WriterOps,
+    mem::{page::MmapMut, DmaBuf},
+    ring::{
+        buffer::{desc_ring::DmaBuffer, ConsumerRingDefault, ProducerRingDefault},
+        descriptors::simple_nic::SimpleNicTxQueueDesc,
+        spec::{simple_nic_rx_ring, simple_nic_tx_ring, SimpleNicRxSpec, SimpleNicTxSpec},
+        traits::DeviceAdaptor,
     },
-    descriptors::simple_nic::SimpleNicTxQueueDesc,
-    mem::{
-        page::MmapMut,
-        DmaBuf,
-    },
-    ringbuf::DescRingBuffer,
     types::PhysAddr,
 };
 
 use super::{
-    types::{SimpleNicRxQueue, SimpleNicTxQueue},
-    FrameRx, FrameTx,
+    // types::{SimpleNicRxQueue, SimpleNicTxQueue},
+    FrameRx,
+    FrameTx,
 };
 
 pub(crate) struct SimpleNicController<Dev: DeviceAdaptor> {
@@ -41,16 +39,14 @@ impl<Dev: DeviceAdaptor> SimpleNicController<Dev> {
         tx_buffer: DmaBuf,
         rx_buffer: DmaBuf,
     ) -> io::Result<Self> {
-        let tx_queue = SimpleNicTxQueue::new(DescRingBuffer::new(tx_rb_buf.buf));
-        let rx_queue = SimpleNicRxQueue::new(DescRingBuffer::new(rx_rb_buf.buf));
         let req_csr_ring = simple_nic_tx_ring(dev.clone());
         let resp_csr_ring = simple_nic_rx_ring(dev.clone());
-        req_csr_ring.write_base_addr(tx_rb_buf.phys_addr)?;
-        resp_csr_ring.write_base_addr(rx_rb_buf.phys_addr)?;
+        let tx_ring = ProducerRingDefault::new(DmaBuffer::new(tx_rb_buf), req_csr_ring).unwrap();
+        let rx_ring = ConsumerRingDefault::new(DmaBuffer::new(rx_rb_buf), resp_csr_ring).unwrap();
 
         Ok(Self {
-            tx: FrameTxQueue::new(tx_queue, tx_buffer.buf, tx_buffer.phys_addr, req_csr_ring),
-            rx: FrameRxQueue::new(rx_queue, rx_buffer.buf, resp_csr_ring),
+            tx: FrameTxQueue::new(tx_ring, tx_buffer.buf, tx_buffer.phys_addr),
+            rx: FrameRxQueue::new(rx_ring, rx_buffer.buf),
         })
     }
 }
@@ -72,9 +68,7 @@ const FRAME_SLOT_SIZE: usize = 128;
 /// Send frame through `SimpleNicTxQueue`
 pub(crate) struct FrameTxQueue<Dev: DeviceAdaptor> {
     /// Inner
-    inner: SimpleNicTxQueue,
-    /// CSR Ring
-    csr_ring: SimpleNicTxRing<Dev>,
+    inner: ProducerRingDefault<Dev, SimpleNicTxSpec>,
     /// A contiguous memory buffer used for sending data
     buf: MmapMut,
     /// Base physical address of the buffer
@@ -86,14 +80,12 @@ pub(crate) struct FrameTxQueue<Dev: DeviceAdaptor> {
 impl<Dev: DeviceAdaptor> FrameTxQueue<Dev> {
     /// Creates a new `FrameTxQueue`
     pub(crate) fn new(
-        inner: SimpleNicTxQueue,
+        inner: ProducerRingDefault<Dev, SimpleNicTxSpec>,
         buf: MmapMut,
         buf_base_phys_addr: PhysAddr,
-        csr_ring: SimpleNicTxRing<Dev>,
     ) -> Self {
         Self {
             inner,
-            csr_ring,
             buf,
             buf_base_phys_addr,
             buf_head: 0,
@@ -132,12 +124,8 @@ impl<Dev: DeviceAdaptor + Send + 'static> FrameTx for FrameTxQueue<Dev> {
         let desc = self
             .build_desc(buf)
             .unwrap_or_else(|| unreachable!("buffer is smaller than u32::MAX"));
-        while !self.inner.push(desc) {
+        while !self.inner.try_push_atomic(&[desc]).unwrap() {
             std::hint::spin_loop();
-        }
-        let _ = self.csr_ring.write_head(self.inner.head());
-        if let Ok(tail_ptr) = self.csr_ring.read_tail() {
-            self.inner.set_tail(tail_ptr);
         }
 
         Ok(())
@@ -147,25 +135,18 @@ impl<Dev: DeviceAdaptor + Send + 'static> FrameTx for FrameTxQueue<Dev> {
 /// Receive frame from `SimpleNicRxQueue`
 pub(crate) struct FrameRxQueue<Dev: DeviceAdaptor> {
     /// Queue for receiving frames from the NIC
-    rx_queue: SimpleNicRxQueue,
+    rx_queue: ConsumerRingDefault<Dev, SimpleNicRxSpec>,
     /// Buffer for storing received frames
     rx_buf: MmapMut,
-    /// CSR Ring
-    csr_ring: SimpleNicRxRing<Dev>,
 }
 
 impl<Dev: DeviceAdaptor> FrameRxQueue<Dev> {
     /// Creates a new `FrameRxQueue`
     pub(crate) fn new(
-        rx_queue: SimpleNicRxQueue,
+        rx_queue: ConsumerRingDefault<Dev, SimpleNicRxSpec>,
         rx_buf: MmapMut,
-        csr_ring: SimpleNicRxRing<Dev>,
     ) -> Self {
-        Self {
-            rx_queue,
-            rx_buf,
-            csr_ring,
-        }
+        Self { rx_queue, rx_buf }
     }
 }
 
@@ -173,7 +154,7 @@ impl<Dev: DeviceAdaptor + Send + 'static> FrameRx for FrameRxQueue<Dev> {
     #[allow(clippy::arithmetic_side_effects)]
     #[allow(clippy::as_conversions)] // converting u32 to usize
     fn recv_nonblocking(&mut self) -> io::Result<Vec<u8>> {
-        let Some(desc) = self.rx_queue.pop() else {
+        let Some(desc) = self.rx_queue.try_pop().unwrap() else {
             return Err(io::ErrorKind::WouldBlock.into());
         };
         let pos = (desc.slot_idx() as usize)

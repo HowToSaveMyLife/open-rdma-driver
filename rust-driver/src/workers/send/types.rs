@@ -3,9 +3,7 @@ use std::marker::PhantomData;
 use crossbeam_deque::{Injector, Stealer, Worker};
 
 use crate::{
-    descriptors::{SendQueueReqDescSeg0, SendQueueReqDescSeg1},
     rdma_utils::{psn::Psn, qp::convert_ibv_mtu_to_u16},
-    ringbuf::{DescRingBuffer, DescSerialize},
     types::{RemoteAddr, VirtAddr},
 };
 
@@ -16,53 +14,31 @@ pub(super) type WrStealer = Stealer<WrChunk>;
 /// Worker
 pub(super) type WrWorker = Worker<WrChunk>;
 
-/// Send queue descriptor types that can be submitted
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum SendQueueDesc {
-    /// First segment
-    Seg0(SendQueueReqDescSeg0),
-    /// Second segment
-    Seg1(SendQueueReqDescSeg1),
-}
+// /// A transmit queue for the send operations
+// pub(crate) struct SendQueue<Dev: DeviceAdaptor> {
+//     /// Inner producer ring buffer
+//     inner: ProducerRingDefault<Dev, SendRingSpec>,
+// }
 
-impl DescSerialize for SendQueueDesc {
-    fn serialize(&self) -> [u8; 32] {
-        match *self {
-            SendQueueDesc::Seg0(x) => x.serialize(),
-            SendQueueDesc::Seg1(x) => x.serialize(),
-        }
-    }
-}
+// impl<Dev: DeviceAdaptor> SendQueue<Dev> {
+//     pub(crate) fn new(ring: ProducerRingDefault<Dev, SendRingSpec>) -> Self {
+//         Self { inner: ring }
+//     }
 
-/// A transmit queue for the simple NIC device.
-pub(crate) struct SendQueue {
-    /// Inner ring buffer
-    inner: DescRingBuffer,
-}
+//     pub(crate) fn push(&mut self, desc: SendQueueDesc) -> bool {
+//         self.inner.try_push(desc).unwrap()
+//     }
 
-impl SendQueue {
-    pub(crate) fn new(ring_buffer: DescRingBuffer) -> Self {
-        Self { inner: ring_buffer }
-    }
+//     /// Returns the head pointer of the buffer
+//     pub(crate) fn head(&self) -> u32 {
+//         self.inner.head()
+//     }
 
-    pub(crate) fn push(&mut self, desc: SendQueueDesc) -> bool {
-        self.inner.push(&desc)
-    }
-
-    /// Returns the head pointer of the buffer
-    pub(crate) fn head(&self) -> u32 {
-        self.inner.head() as u32
-    }
-
-    /// Returns the head pointer of the buffer
-    pub(crate) fn set_tail(&mut self, tail: u32) {
-        self.inner.set_tail(tail);
-    }
-
-    pub(crate) fn remaining(&self) -> usize {
-        self.inner.remaining()
-    }
-}
+//     #[allow(clippy::cast_possible_truncation)]
+//     pub(crate) fn remaining(&mut self) -> usize {
+//         self.inner.available().unwrap() as usize
+//     }
+// }
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Initial;
