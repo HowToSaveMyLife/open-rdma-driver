@@ -57,7 +57,7 @@ impl BlueRdmaCore {
         device.set_custom()?;
 
         debug!("before initialize HwDeviceCtx");
-        let ctx = HwDeviceCtx::initialize(device, config)?;
+        let ctx = HwDeviceCtx::initialize(device, config, sysfs_name.to_string())?;
         Ok(ctx)
     }
 
@@ -83,7 +83,7 @@ impl BlueRdmaCore {
         let ack = AckTimeoutConfig::new(16, 40, 2);
         let config = DeviceConfig { ack };
         // (check_duration, local_ack_timeout) : (256ms, 1s) because emulator is slow
-        HwDeviceCtx::initialize(device, config)
+        HwDeviceCtx::initialize(device, config, sysfs_name.to_string())
     }
 
     #[allow(clippy::unnecessary_wraps)]

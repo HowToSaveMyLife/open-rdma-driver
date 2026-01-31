@@ -7,6 +7,7 @@
 #include <errno.h>
 
 bool rdma_debug_enabled = true;
+bool is_server = false;
 
 void rdma_set_debug(bool enabled) {
     rdma_debug_enabled = enabled;
@@ -266,7 +267,10 @@ int rdma_qp_to_rts(struct ibv_qp *qp) {
     };
 
     // Set GID for loopback
-    uint32_t ipv4_addr = 0x1122330A;  // Default IPv4 for testing
+    // uint32_t ipv4_addr = 0x1122330A;  // Default IPv4 for testing
+    uint32_t ipv4_addr = is_server ? 0x1122330B : 0x1122330A;
+    rdma_log("[RDMA] Setting GID with IPv4 address 0x%08x (is_server=%d)\n",
+             ipv4_addr, is_server);
     attr.ah_attr.grh.dgid.raw[10] = 0xFF;
     attr.ah_attr.grh.dgid.raw[11] = 0xFF;
     attr.ah_attr.grh.dgid.raw[12] = (ipv4_addr >> 24) & 0xFF;

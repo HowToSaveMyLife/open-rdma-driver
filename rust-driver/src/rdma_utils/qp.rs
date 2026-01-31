@@ -185,6 +185,14 @@ impl<T: Default> Default for QpTable<T> {
     }
 }
 
+impl<T: Clone> Clone for QpTable<T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct QpTableShared<T> {
     inner: Arc<[Mutex<T>]>,
@@ -236,6 +244,18 @@ impl<T> QpTableShared<T> {
         } else {
             None
         }
+    }
+
+    pub(crate) fn query<F>(&self, mut f: F) -> Option<T>
+    where
+        F: FnMut(&T) -> bool,
+        T: Clone,
+    {
+        self.inner.iter()
+            .find_map(|x| {
+                let guard = x.lock();
+                f(&guard).then(|| guard.clone())
+            })
     }
 }
 
