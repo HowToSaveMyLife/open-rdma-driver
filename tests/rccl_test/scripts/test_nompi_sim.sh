@@ -11,6 +11,8 @@ LOG_DIR=$(cd "$SCRIPT_DIR/../log/sim" && pwd)
 # Source 共同函数库
 source $SCRIPT_DIR/../../common/test_common.sh
 
+
+
 # 设置信号处理
 setup_signal_handler
 
@@ -25,6 +27,10 @@ build_rust_driver "sim"
 
 # 启动 RTL 模拟器（2个实例）
 start_rtl_simulators 2 "rccl"
+
+# 编译 hack_libc
+cd "$SCRIPT_DIR/../../hack_libc"
+cargo build
 
 # 编译测试程序
 build_test_program "$SCRIPT_DIR/.."

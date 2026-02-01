@@ -2,6 +2,9 @@
 
 This directory contains RCCL (ROCm Collective Communications Library) test programs for testing the Blue RDMA driver with ROCm/DCU environments.
 
+## 注意事项
+hack_libc 需要较多的大页内存，目前申请了4GB内存
+
 ## Test Programs
 
 ### 1. Simple Test (`simple_test`)
