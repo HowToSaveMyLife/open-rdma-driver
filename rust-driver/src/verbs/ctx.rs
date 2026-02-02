@@ -13,9 +13,9 @@ use crate::{
         config::NetworkConfig,
         reader::NetConfigReader,
         recv_chan::{
-            post_recv_channel, PendingSendQueueTable, PostRecvTx, PostRecvTxTable, RecvWorker,
-            RecvWrQueueTable, SharedPendingSendQueue, SharedRecvWrQueue, TcpChannel,
-            PENDING_SEND_QUEUE_CAPACITY,
+            IpTxTable, PendingSendQueueTable, PostRecvTxTable, RecvWorkers, RecvWrQueueTable,
+            SharedPendingSendQueue, SharedRecvWrQueue, PENDING_SEND_QUEUE_CAPACITY,
+            RECV_WORKER_PORT,
         },
         simple_nic::SimpleNicController,
     },
@@ -26,7 +26,7 @@ use crate::{
         qp::{QpManager, QpTableShared},
         types::{
             ibv_qp_attr::{IbvQpAttr, IbvQpInitAttr},
-            QpAttr, RecvWr, SendWr, SendWrRdma,
+            QpAttr, RecvWr, RecvWrQpn, SendWr, SendWrRdma,
         },
     },
     ring::buffer::DefaultDescRingBufAllocator,
@@ -78,6 +78,7 @@ pub(crate) struct HwDeviceCtx<H: HwDevice> {
     cq_manager: CqManager,
     cq_table: CompletionQueueTable,
     cmd_controller: CommandConfigurator<H::Adaptor>,
+    ip_tx_table: IpTxTable,
     post_recv_tx_table: PostRecvTxTable,
     recv_wr_queue_table: RecvWrQueueTable,
     // TODO need to optimaze
@@ -98,10 +99,10 @@ where
     H::DmaBufAllocator: DmaBufAllocator,
     H::UmemHandler: UmemHandler,
 {
-    pub(crate) fn initialize(device: H, config: DeviceConfig) -> Result<Self> {
+    pub(crate) fn initialize(device: H, config: DeviceConfig, sysfs_name: String) -> Result<Self> {
         debug!("begin initializ...");
         let mode = Mode::default();
-        let net_config = NetConfigReader::read();
+        let net_config = NetConfigReader::read(sysfs_name);
         debug!("begin device adaptor initializ...");
         let adaptor = device.new_adaptor()?;
         debug!("device adaptor initialized...");
@@ -199,6 +200,20 @@ where
         #[allow(clippy::mem_forget)]
         std::mem::forget(simple_nic_rx); // prevent libc::munmap being called
 
+        let recv_wr_queue_table = RecvWrQueueTable::new();
+        let pending_post_recv_queue = RecvWrQueueTable::new();
+        let pending_send_queue_table = PendingSendQueueTable::new();
+
+        RecvWorkers::new(
+            net_config.ip.ip(),
+            RECV_WORKER_PORT,
+            qp_attr_table.clone(),
+            recv_wr_queue_table.clone(),
+            pending_send_queue_table.clone(),
+            rdma_write_tx.clone(),
+        )
+        .spawn();
+
         Ok(Self {
             net_config,
             device,
@@ -209,10 +224,11 @@ where
             cq_table,
             mtt_buffer: rb_allocator.alloc()?,
             mtt: Mtt::new(),
+            ip_tx_table: IpTxTable::new(),
             post_recv_tx_table: PostRecvTxTable::new(),
-            recv_wr_queue_table: RecvWrQueueTable::new(),
-            pending_post_recv_queue: RecvWrQueueTable::new(),
-            pending_send_queue_table: PendingSendQueueTable::new(),
+            recv_wr_queue_table,
+            pending_post_recv_queue,
+            pending_send_queue_table,
             rdma_write_tx,
             completion_tx,
             config,
@@ -509,14 +525,17 @@ where
                 let current_ip = (current.dqp_ip != 0).then_some(current.dqp_ip);
                 let attr_ip = attr.dest_qp_ip().map(Ipv4Addr::to_bits);
                 let ip_addr = attr_ip.or(current_ip).unwrap_or_else(|| {
-                    if attr.qp_state() == Some(ibverbs_sys::ibv_qp_state::IBV_QPS_RTS) {
-                        let ip: Ipv4Addr = self.net_config.ip.ip();
-                        log::warn!("update qpn {} to RTS with default ip {}", qpn, ip);
-                        ip.to_bits()
-                    } else {
+                    if attr.qp_state() == Some(ibverbs_sys::ibv_qp_state::IBV_QPS_INIT) {
                         0
+                    } else {
+                        panic!(
+                            "QP {qpn} dest_qp_ip must be set in state {:?}, addr is {:?}",
+                            attr.qp_state(),
+                            attr.dest_qp_ip()
+                        );
                     }
                 });
+                log::info!("update_qp set dqp_ip={:?}", Ipv4Addr::from_bits(ip_addr));
                 let entry = UpdateQp {
                     qpn,
                     ip_addr,
@@ -549,9 +568,11 @@ where
             debug!("update_qp get dqp_ip={dqp_ip:?}");
             log::info!("qp local ip is {},remote ip is {}", qp.ip, qp.dqp_ip);
             //TODO 这里不会有并发问题吗？在 qp 准备好之后，马上 post_recv，会不会出现问题？
-            let (tx, rx) =
-                post_recv_channel::<TcpChannel>(qp.ip.into(), qp.dqp_ip.into(), qpn, qp.dqpn)?;
-            debug!("after create post recv tx and rx table");
+            let tx = self.ip_tx_table.get_or_connect(
+                self.net_config.ip.ip(),
+                dqp_ip,
+                RECV_WORKER_PORT,
+            )?;
             self.post_recv_tx_table.insert(qpn, tx);
 
             // 刷新 pending 队列中缓存的 RecvWr
@@ -563,38 +584,13 @@ where
                     // 获取 tx 发送所有 pending 的 RecvWr
                     if let Some(tx) = self.post_recv_tx_table.get_qp_mut(qpn) {
                         while let Some(wr) = queue.pop_front() {
-                            if let Err(e) = tx.send(wr) {
+                            if let Err(e) = tx.lock().send(RecvWrQpn { wr, qpn }) {
                                 error!("Failed to send pending RecvWr for QP {qpn}: {e}");
                             }
                         }
                     }
                 }
             }
-
-            let wr_queue =
-                self.recv_wr_queue_table
-                    .clone_recv_wr_queue(qpn)
-                    .ok_or(RdmaError::NotFound(format!(
-                        "Receive WR queue for QP {qpn} not found",
-                    )))?;
-
-            // Get pending send queue
-            let pending_send_queue =
-                self.pending_send_queue_table
-                    .clone_queue(qpn)
-                    .ok_or(RdmaError::NotFound(format!(
-                        "Pending send queue for QP {qpn} not found",
-                    )))?;
-
-            debug!("before spawn RecvWorker");
-            RecvWorker::new(
-                rx,
-                wr_queue,
-                pending_send_queue,
-                self.rdma_write_tx.clone(),
-                qpn,
-            )
-            .spawn();
         }
 
         Ok(())
@@ -711,7 +707,7 @@ where
             // RTR/RTS 状态：直接发送
             debug!("Sending RecvWr for QP {qpn} in RTR/RTS state");
 
-            let result = tx.send(wr);
+            let result = tx.lock().send(RecvWrQpn { wr, qpn });
             debug!("result is {:?}", result);
             result?;
         } else {

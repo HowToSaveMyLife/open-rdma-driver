@@ -389,6 +389,32 @@ impl RecvWr {
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct RecvWrQpn {
+    pub(crate) wr: RecvWr,
+    pub(crate) qpn: u32,
+}
+
+impl RecvWrQpn {
+    pub(crate) fn new(qpn: u32, wr: RecvWr) -> Self {
+        Self { wr, qpn }
+    }
+
+    pub(crate) fn to_bytes(self) -> [u8; size_of::<RecvWrQpn>()] {
+        let mut bytes = [0u8; size_of::<RecvWrQpn>()];
+        bytes[0..24].copy_from_slice(&self.wr.to_bytes());
+        bytes[24..28].copy_from_slice(&self.qpn.to_be_bytes());
+        bytes
+    }
+
+    #[allow(clippy::unwrap_used)]
+    pub(crate) fn from_bytes(bytes: &[u8; size_of::<RecvWrQpn>()]) -> Self {
+        let wr = RecvWr::from_bytes(&bytes[0..24].try_into().unwrap());
+        let qpn = u32::from_be_bytes(bytes[24..28].try_into().unwrap());
+        Self { wr, qpn }
+    }
+}
+
 #[derive(Default, Clone, Copy)]
 pub(crate) struct QpAttr {
     pub(crate) qp_type: u8,
@@ -489,6 +515,7 @@ pub(crate) mod ibv_qp_attr {
 
     impl IbvQpAttr {
         pub(crate) fn new(attr: ibv_qp_attr, attr_mask: u32) -> Self {
+            // TODO: support IPv6
             let dest_qp_ip = if attr_mask & ibv_qp_attr_mask::IBV_QP_AV.0 != 0 {
                 let gid = unsafe { attr.ah_attr.grh.dgid.raw };
                 info!("gid: {:x}", u128::from_be_bytes(gid));

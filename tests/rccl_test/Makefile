@@ -170,6 +170,7 @@ nompi_hack_rank0: $(NOMPI_TARGET)
 	@echo "Run 'make nompi_rank1' in another terminal"
 	@echo ""
 	sudo env \
+		NCCL_IB_GID_INDEX=3 \
 		NCCL_DEBUG=INFO \
 		NCCL_IB_DISABLE=0 \
 		NCCL_IB_HCA=bluerdma0 \
@@ -191,6 +192,7 @@ nompi_hack_rank1: $(NOMPI_TARGET)
 	@echo "Connecting to rank 0..."
 	@echo ""
 	sudo env \
+		NCCL_IB_GID_INDEX=3 \
 		NCCL_DEBUG=INFO \
 		NCCL_IB_DISABLE=0 \
 		NCCL_IB_HCA=bluerdma1 \

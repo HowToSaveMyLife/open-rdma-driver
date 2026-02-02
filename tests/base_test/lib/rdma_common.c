@@ -8,6 +8,9 @@
 
 bool rdma_debug_enabled = true;
 
+// TODO 需要删除，替换为更为模块化的东西
+bool is_server = false;
+
 void rdma_set_debug(bool enabled) {
     rdma_debug_enabled = enabled;
 }
@@ -242,6 +245,17 @@ int rdma_qp_to_rtr(struct ibv_qp *qp, uint32_t dest_qp_num) {
             .port_num = 1
         }
     };
+    // Set GID for loopback
+    // uint32_t ipv4_addr = 0x1122330A;  // Default IPv4 for testing
+    uint32_t ipv4_addr = is_server ? 0x1122330B : 0x1122330A;
+    rdma_log("[RDMA] Setting GID with IPv4 address 0x%08x (is_server=%d)\n",
+             ipv4_addr, is_server);
+    attr.ah_attr.grh.dgid.raw[10] = 0xFF;
+    attr.ah_attr.grh.dgid.raw[11] = 0xFF;
+    attr.ah_attr.grh.dgid.raw[12] = (ipv4_addr >> 24) & 0xFF;
+    attr.ah_attr.grh.dgid.raw[13] = (ipv4_addr >> 16) & 0xFF;
+    attr.ah_attr.grh.dgid.raw[14] = (ipv4_addr >> 8) & 0xFF;
+    attr.ah_attr.grh.dgid.raw[15] = ipv4_addr & 0xFF;
 
     if (ibv_modify_qp(qp, &attr,
                       IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
@@ -265,14 +279,7 @@ int rdma_qp_to_rts(struct ibv_qp *qp) {
         .max_rd_atomic = 1
     };
 
-    // Set GID for loopback
-    uint32_t ipv4_addr = 0x1122330A;  // Default IPv4 for testing
-    attr.ah_attr.grh.dgid.raw[10] = 0xFF;
-    attr.ah_attr.grh.dgid.raw[11] = 0xFF;
-    attr.ah_attr.grh.dgid.raw[12] = (ipv4_addr >> 24) & 0xFF;
-    attr.ah_attr.grh.dgid.raw[13] = (ipv4_addr >> 16) & 0xFF;
-    attr.ah_attr.grh.dgid.raw[14] = (ipv4_addr >> 8) & 0xFF;
-    attr.ah_attr.grh.dgid.raw[15] = ipv4_addr & 0xFF;
+
 
     if (ibv_modify_qp(qp, &attr,
                       IBV_QP_STATE | IBV_QP_AV | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |

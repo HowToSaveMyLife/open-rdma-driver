@@ -275,6 +275,7 @@ dependencies = [
  "rtrb",
  "serde",
  "serde_json",
+ "socket2",
  "spin_sleep",
  "thiserror 2.0.9",
  "tokio",

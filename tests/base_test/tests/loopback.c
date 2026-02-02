@@ -4,6 +4,10 @@
 #include <string.h>
 #include <unistd.h>
 
+
+//TDO 删除这个
+extern bool is_server;
+
 // Loopback test: Two QPs on the same device communicate with each other
 int run_loopback_test(int msg_len, int num_rounds) {
     struct rdma_context ctx;
@@ -12,6 +16,7 @@ int run_loopback_test(int msg_len, int num_rounds) {
     char *src_buffer, *dst_buffer;
     int failed_rounds = 0;
 
+    is_server = false;
     // Configure RDMA context
     rdma_default_config(&config);
     config.dev_index = 0;

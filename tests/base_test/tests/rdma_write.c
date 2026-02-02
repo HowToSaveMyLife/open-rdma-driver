@@ -11,6 +11,8 @@
 #define BUF_SIZE (256 * 1024)
 #define MAX_ROUNDS 5
 
+extern bool is_server;
+
 // RDMA WRITE test with multiple rounds
 // Tests repeated RDMA WRITE operations and data verification
 
@@ -318,10 +320,12 @@ int main(int argc, char *argv[]) {
     if (is_client) {
         // Client mode: dev_index=0 (fixed)
         int dev_index = 0;
+        is_server = true;
         return run_client(msg_len, server_ip, dev_index, num_rounds);
     } else {
         // Server mode: dev_index=1 (fixed)
         int dev_index = 1;
+        is_server = false;
         return run_server(msg_len, dev_index, num_rounds);
     }
 }

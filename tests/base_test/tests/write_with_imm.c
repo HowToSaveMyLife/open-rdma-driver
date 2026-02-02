@@ -8,6 +8,9 @@
 #define DEFAULT_PORT 12348
 #define MIN_BUFFER_SIZE 4096
 
+
+extern bool is_server;
+
 // RDMA WRITE with Immediate test
 // Server posts recv to receive immediate data
 // Client performs RDMA WRITE with immediate value
@@ -313,9 +316,11 @@ int main(int argc, char *argv[]) {
 
     if (argc == 2) {
         // Server mode
+        is_server = true;
         return run_server(msg_len);
     } else {
         // Client mode
+        is_server = false;
         return run_client(argv[2], msg_len);
     }
 }

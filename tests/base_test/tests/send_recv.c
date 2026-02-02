@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #define DEFAULT_PORT 12346
+extern bool is_server;
 
 int run_server(int msg_len) {
     struct rdma_context ctx;
@@ -266,9 +267,11 @@ int main(int argc, char *argv[]) {
 
     if (argc == 2) {
         // Server mode
+        is_server = true;
         return run_server(msg_len);
     } else {
         // Client mode
+        is_server = false;
         return run_client(msg_len, argv[2]);
     }
 }

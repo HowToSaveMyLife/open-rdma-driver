@@ -41,11 +41,11 @@ cd $SCRIPT_DIR/..
 echo "Current directory: $(pwd)"
 
 # 启动 Rank 0 (先启动，让它完成设备初始化)
-RSUT_LOG=debug make nompi_hack_rank0 &> $LOG_DIR/rccl-1.log &
+RUST_LOG=debug make nompi_hack_rank0 &> $LOG_DIR/rccl-1.log &
 RANK0_PID=$!
 
 # 启动 Rank 1
-RSUT_LOG=debug make nompi_hack_rank1 &> $LOG_DIR/rccl-2.log &
+RUST_LOG=debug make nompi_hack_rank1 &> $LOG_DIR/rccl-2.log &
 RANK1_PID=$!
 
 echo "Rank 0 PID: $RANK0_PID"

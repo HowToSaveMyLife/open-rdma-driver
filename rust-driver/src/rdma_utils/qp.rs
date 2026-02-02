@@ -1,7 +1,4 @@
-use std::{
-    iter, mem,
-    sync::Arc,
-};
+use std::{iter, mem, sync::Arc};
 
 use bitvec::vec::BitVec;
 use parking_lot::Mutex;
@@ -121,6 +118,7 @@ pub(crate) fn convert_ibv_mtu_to_u16(ibv_mtu: u8) -> Option<u16> {
     Some(pmtu)
 }
 
+// TODO 需要改成 QpTable<T, const N: usize> 性能更高
 #[derive(Debug)]
 pub(crate) struct QpTable<T> {
     inner: Box<[T]>,
@@ -185,6 +183,14 @@ impl<T: Default> Default for QpTable<T> {
     }
 }
 
+impl<T: Clone> Clone for QpTable<T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct QpTableShared<T> {
     inner: Arc<[Mutex<T>]>,
@@ -236,6 +242,17 @@ impl<T> QpTableShared<T> {
         } else {
             None
         }
+    }
+
+    pub(crate) fn query<F>(&self, mut f: F) -> Option<T>
+    where
+        F: FnMut(&T) -> bool,
+        T: Clone,
+    {
+        self.inner.iter().find_map(|x| {
+            let guard = x.lock();
+            f(&guard).then(|| guard.clone())
+        })
     }
 }
 
