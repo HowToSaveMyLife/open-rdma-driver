@@ -2,7 +2,9 @@
 #include "../lib/rdma_transport.h"
 #include "../lib/rdma_debug.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 #include <unistd.h>
 
 #define DEFAULT_PORT 12345
@@ -18,7 +20,6 @@ int run_server(int msg_len, int dev_index, int num_rounds) {
     struct tcp_transport transport;
     struct qp_info local_info, remote_info;
     char *dst_buffer;
-    char *expected_pattern;
 
     printf("========== RDMA WRITE Server ==========\n");
     printf("Device index: %d, Message length: %d, Rounds: %d\n",
@@ -42,22 +43,8 @@ int run_server(int msg_len, int dev_index, int num_rounds) {
     // dst_buffer is in the second half
     dst_buffer = ctx.buffer + BUF_SIZE;
 
-    // Allocate expected pattern buffer
-    expected_pattern = malloc(msg_len);
-    if (!expected_pattern) {
-        fprintf(stderr, "[ERROR] Failed to allocate pattern buffer\n");
-        rdma_destroy_context(&ctx);
-        return -1;
-    }
-
-    // Generate expected pattern
-    for (int i = 0; i < msg_len; i++) {
-        expected_pattern[i] = i & 0xFF;
-    }
-
     // Setup TCP server
     if (tcp_server_init(&transport, DEFAULT_PORT) < 0) {
-        free(expected_pattern);
         rdma_destroy_context(&ctx);
         return -1;
     }
@@ -65,7 +52,6 @@ int run_server(int msg_len, int dev_index, int num_rounds) {
     printf("[SERVER] Waiting for client connection...\n");
     if (tcp_server_accept(&transport) < 0) {
         tcp_transport_close(&transport);
-        free(expected_pattern);
         rdma_destroy_context(&ctx);
         return -1;
     }
@@ -77,7 +63,6 @@ int run_server(int msg_len, int dev_index, int num_rounds) {
 
     if (rdma_exchange_qp_info(transport.client_fd, &local_info, &remote_info) < 0) {
         tcp_transport_close(&transport);
-        free(expected_pattern);
         rdma_destroy_context(&ctx);
         return -1;
     }
@@ -85,7 +70,6 @@ int run_server(int msg_len, int dev_index, int num_rounds) {
     // Connect QP
     if (rdma_connect_qp(ctx.qp, remote_info.qp_num) < 0) {
         tcp_transport_close(&transport);
-        free(expected_pattern);
         rdma_destroy_context(&ctx);
         return -1;
     }
@@ -106,7 +90,9 @@ int run_server(int msg_len, int dev_index, int num_rounds) {
         COMPILER_BARRIER();
 
         // Check received data
-        size_t error_count = rdma_memory_diff(expected_pattern, dst_buffer, msg_len);
+        size_t error_count = 0;
+        struct rdma_pattern pattern = RDMA_PATTERN_SEQ();
+        rdma_verify_data(dst_buffer, msg_len, &pattern, &error_count);
         int valid_count = msg_len - error_count;
 
         printf("[SERVER] Round %d: received %d/%d bytes correctly",
@@ -134,7 +120,6 @@ int run_server(int msg_len, int dev_index, int num_rounds) {
     printf("========================================\n");
 
     tcp_transport_close(&transport);
-    free(expected_pattern);
     rdma_destroy_context(&ctx);
 
     return (failed_rounds == 0) ? 0 : -1;
@@ -285,36 +270,58 @@ int run_client(int msg_len, const char *server_ip, int dev_index, int num_rounds
 int main(int argc, char *argv[]) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
-    if (argc < 3) {
+    if (argc < 1) {
         fprintf(stderr, "Usage:\n");
-        fprintf(stderr, "  Server: %s <msg_len> server [dev_index] [rounds]\n", argv[0]);
-        fprintf(stderr, "  Client: %s <msg_len> client <server_ip> [dev_index] [rounds]\n", argv[0]);
+        fprintf(stderr, "  Server: %s [msg_len] [rounds]\n", argv[0]);
+        fprintf(stderr, "  Client: %s [msg_len] [rounds] <server_ip>\n", argv[0]);
         fprintf(stderr, "\nExample:\n");
-        fprintf(stderr, "  Server: %s 8192 server 1 5\n", argv[0]);
-        fprintf(stderr, "  Client: %s 8192 client 127.0.0.1 0 5\n", argv[0]);
+        fprintf(stderr, "  Server: %s 8192 10\n", argv[0]);
+        fprintf(stderr, "  Client: %s 8192 10 127.0.0.1\n", argv[0]);
+        fprintf(stderr, "\nDefaults: msg_len=%d, rounds=%d\n", BUF_SIZE, MAX_ROUNDS);
+        fprintf(stderr, "Note: Device index is fixed (server=1, client=0)\n");
         return EXIT_FAILURE;
     }
 
-    int msg_len = atoi(argv[1]);
-    const char *mode = argv[2];
-
-    if (strcmp(mode, "server") == 0) {
-        int dev_index = (argc >= 4) ? atoi(argv[3]) : 1;
-        int num_rounds = (argc >= 5) ? atoi(argv[4]) : MAX_ROUNDS;
-        return run_server(msg_len, dev_index, num_rounds);
+    // Parse msg_len (default: BUF_SIZE)
+    int msg_len = BUF_SIZE;
+    if (argc >= 2) {
+        msg_len = atoi(argv[1]);
+        if (msg_len == 0) msg_len = BUF_SIZE;
     }
-    else if (strcmp(mode, "client") == 0) {
-        if (argc < 4) {
-            fprintf(stderr, "Error: Client mode requires server IP\n");
-            return EXIT_FAILURE;
+
+    // Detect mode based on last argument
+    // If last argument looks like an IP address (contains '.' or ':'), it's client mode
+    bool is_client = false;
+    const char *server_ip = NULL;
+
+    if (argc >= 2) {
+        const char *last_arg = argv[argc - 1];
+        if (strchr(last_arg, '.') != NULL || strchr(last_arg, ':') != NULL) {
+            // Client mode: last argument is server IP
+            is_client = true;
+            server_ip = last_arg;
         }
-        const char *server_ip = argv[3];
-        int dev_index = (argc >= 5) ? atoi(argv[4]) : 0;
-        int num_rounds = (argc >= 6) ? atoi(argv[5]) : MAX_ROUNDS;
-        return run_client(msg_len, server_ip, dev_index, num_rounds);
     }
-    else {
-        fprintf(stderr, "Error: Invalid mode '%s'. Use 'server' or 'client'\n", mode);
-        return EXIT_FAILURE;
+
+    // Parse rounds (default: MAX_ROUNDS)
+    int num_rounds = MAX_ROUNDS;
+    if (argc >= 3) {
+        // If client mode, rounds is at argc-2 (before IP)
+        // If server mode, rounds is at argv[2]
+        int rounds_idx = is_client ? (argc - 2) : 2;
+        if (rounds_idx >= 2 && rounds_idx < argc) {
+            num_rounds = atoi(argv[rounds_idx]);
+            if (num_rounds == 0) num_rounds = MAX_ROUNDS;
+        }
+    }
+
+    if (is_client) {
+        // Client mode: dev_index=0 (fixed)
+        int dev_index = 0;
+        return run_client(msg_len, server_ip, dev_index, num_rounds);
+    } else {
+        // Server mode: dev_index=1 (fixed)
+        int dev_index = 1;
+        return run_server(msg_len, dev_index, num_rounds);
     }
 }

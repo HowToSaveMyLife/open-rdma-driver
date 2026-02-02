@@ -135,15 +135,17 @@ int run_loopback_test(int msg_len, int num_rounds) {
         printf("[LOOPBACK] RDMA WRITE completed (wr_id=%lu, status=%d)\n",
                wc.wr_id, wc.status);
 
-        // Verify data
-        int error_count = rdma_memory_diff(src_buffer, dst_buffer, msg_len);
+        // Verify data using unified API
+        size_t error_count = 0;
+        struct rdma_pattern pattern = RDMA_PATTERN_SEQ();
+        rdma_verify_data(dst_buffer, msg_len, &pattern, &error_count);
         int valid_count = msg_len - error_count;
 
         printf("[LOOPBACK] Data verification: %d/%d bytes correct",
                valid_count, msg_len);
 
         if (error_count > 0) {
-            printf(ANSI_COLOR_RED " (%d errors)" ANSI_COLOR_RESET "\n", error_count);
+            printf(ANSI_COLOR_RED " (%zu errors)" ANSI_COLOR_RESET "\n", error_count);
             failed_rounds++;
         } else {
             printf(ANSI_COLOR_GREEN " (PASS)" ANSI_COLOR_RESET "\n");

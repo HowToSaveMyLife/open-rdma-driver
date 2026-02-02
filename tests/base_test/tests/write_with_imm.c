@@ -136,18 +136,18 @@ int run_server(int msg_len) {
 
     // Validate written data (if msg_len > 0)
     if (msg_len > 0) {
-        int cnt_valid = 0;
-        for (int i = 0; i < msg_len; i++) {
-            if (ctx.buffer[i] == 'W') {
-                cnt_valid++;
-            }
-        }
-        printf("[SERVER] Validated data: %d/%d bytes correct\n", cnt_valid, msg_len);
+        size_t error_count = 0;
+        struct rdma_pattern pattern = RDMA_PATTERN_CHAR('W');
+        rdma_verify_data(ctx.buffer, msg_len, &pattern, &error_count);
+        int cnt_valid = msg_len - error_count;
 
-        if (cnt_valid == msg_len) {
-            printf(ANSI_COLOR_GREEN "[SERVER] Data verification PASSED!\n" ANSI_COLOR_RESET);
-        } else {
+        printf("[SERVER] Data verification: %d/%d bytes correct", cnt_valid, msg_len);
+        if (error_count > 0) {
+            printf(ANSI_COLOR_RED " (%zu errors)" ANSI_COLOR_RESET "\n", error_count);
             printf(ANSI_COLOR_RED "[SERVER] Data verification FAILED!\n" ANSI_COLOR_RESET);
+        } else {
+            printf(ANSI_COLOR_GREEN " (PASS)" ANSI_COLOR_RESET "\n");
+            printf(ANSI_COLOR_GREEN "[SERVER] Data verification PASSED!\n" ANSI_COLOR_RESET);
         }
     }
 

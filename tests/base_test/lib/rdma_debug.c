@@ -1,5 +1,6 @@
 #include "rdma_debug.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static void print_hex_line(const char *buf, size_t offset, size_t length,
@@ -171,4 +172,80 @@ void rdma_print_zero_ranges(const char *buffer, size_t length) {
     } else {
         printf("Total zero bytes: %d / %zu\n", zero_count, length);
     }
+}
+
+int rdma_generate_pattern(void *buffer, size_t length,
+                          const struct rdma_pattern *pattern) {
+    if (!buffer || !pattern) {
+        fprintf(stderr, "[ERROR] Invalid parameters to rdma_generate_pattern\n");
+        return -1;
+    }
+
+    uint8_t *buf = (uint8_t *)buffer;
+
+    switch (pattern->type) {
+    case RDMA_PATTERN_SEQUENTIAL:
+        // Generate sequential bytes: 0x00, 0x01, ..., 0xFF, 0x00, ...
+        for (size_t i = 0; i < length; i++) {
+            buf[i] = i & 0xFF;
+        }
+        break;
+
+    case RDMA_PATTERN_FIXED_CHAR:
+        // Fill with fixed character
+        memset(buf, pattern->fixed_char, length);
+        break;
+
+    case RDMA_PATTERN_CUSTOM:
+        // Copy user-provided data
+        if (!pattern->custom_data) {
+            fprintf(stderr, "[ERROR] Custom pattern data is NULL\n");
+            return -1;
+        }
+        memcpy(buf, pattern->custom_data, length);
+        break;
+
+    default:
+        fprintf(stderr, "[ERROR] Unknown pattern type: %d\n", pattern->type);
+        return -1;
+    }
+
+    return 0;
+}
+
+int rdma_verify_data(const void *received_data, size_t length,
+                     const struct rdma_pattern *expected_pattern,
+                     size_t *error_count) {
+    if (!received_data || !expected_pattern) {
+        fprintf(stderr, "[ERROR] Invalid parameters to rdma_verify_data\n");
+        if (error_count) *error_count = length;
+        return -1;
+    }
+
+    // Allocate temporary buffer for expected data
+    void *expected_buffer = malloc(length);
+    if (!expected_buffer) {
+        fprintf(stderr, "[ERROR] Failed to allocate verification buffer (%zu bytes)\n", length);
+        if (error_count) *error_count = length;
+        return -1;
+    }
+
+    // Generate expected pattern
+    if (rdma_generate_pattern(expected_buffer, length, expected_pattern) < 0) {
+        free(expected_buffer);
+        if (error_count) *error_count = length;
+        return -1;
+    }
+
+    // Use existing rdma_memory_diff for detailed comparison
+    // This automatically prints colored diff output
+    size_t diff_count = rdma_memory_diff(expected_buffer, received_data, length);
+
+    free(expected_buffer);
+
+    if (error_count) {
+        *error_count = diff_count;
+    }
+
+    return (diff_count == 0) ? 0 : -1;
 }

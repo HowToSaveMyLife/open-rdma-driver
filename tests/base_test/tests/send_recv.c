@@ -106,20 +106,19 @@ int run_server(int msg_len) {
     printf("[SERVER] Receive completed: status=%d, byte_len=%u\n",
            wc.status, wc.byte_len);
 
-    // Validate received data
-    int cnt_valid = 0;
-    for (int i = 0; i < msg_len; i++) {
-        if (ctx.buffer[i] == 'c') {
-            cnt_valid++;
-        }
-    }
+    // Validate received data with full byte-by-byte comparison
+    size_t error_count = 0;
+    struct rdma_pattern pattern = RDMA_PATTERN_CHAR('c');
+    rdma_verify_data(ctx.buffer, msg_len, &pattern, &error_count);
+    int cnt_valid = msg_len - error_count;
 
-    printf("[SERVER] Received %d/%d valid bytes\n", cnt_valid, msg_len);
-
-    if (cnt_valid == msg_len) {
-        printf(ANSI_COLOR_GREEN "[SERVER] Test PASSED!\n" ANSI_COLOR_RESET);
-    } else {
+    printf("[SERVER] Data verification: %d/%d bytes correct", cnt_valid, msg_len);
+    if (error_count > 0) {
+        printf(ANSI_COLOR_RED " (%zu errors)" ANSI_COLOR_RESET "\n", error_count);
         printf(ANSI_COLOR_RED "[SERVER] Test FAILED!\n" ANSI_COLOR_RESET);
+    } else {
+        printf(ANSI_COLOR_GREEN " (PASS)" ANSI_COLOR_RESET "\n");
+        printf(ANSI_COLOR_GREEN "[SERVER] Test PASSED!\n" ANSI_COLOR_RESET);
     }
 
     // Final sync
