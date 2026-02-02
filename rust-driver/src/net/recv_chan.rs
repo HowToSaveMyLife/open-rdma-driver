@@ -4,8 +4,6 @@ use std::{
     net::{Ipv4Addr, TcpListener, TcpStream},
     sync::Arc,
     thread,
-    rc::Rc,
-    cell::RefCell,
     collections::HashMap,
 };
 
@@ -86,7 +84,7 @@ impl TcpChannelRx {
     }
 }
 
-pub(crate) type SharedTcpChannelTx = Rc<RefCell<TcpChannelTx>>;
+pub(crate) type SharedTcpChannelTx = Arc<Mutex<TcpChannelTx>>;
 
 pub(crate) struct PostRecvTxTable<Tx = SharedTcpChannelTx> {
     inner: QpTable<Option<Tx>>,
@@ -144,8 +142,7 @@ impl IpTxTable {
             return Ok(tx.clone());
         }
 
-        let tx = Rc::new(RefCell::new(TcpChannelTx::connect(local_ip,dest_ip, port)?));
-        debug!("IpTxTable: connected TcpChannelTx to IP {}", tx.borrow_mut().inner.as_ref().unwrap().peer_addr().unwrap());
+        let tx = Arc::new(Mutex::new(TcpChannelTx::connect(local_ip, dest_ip, port)?));
         match self.inner.insert(dest_ip, tx.clone()) {
             Some(_) => debug!("IpTxTable: replaced existing TcpChannelTx for IP {}", dest_ip),
             None => (),
@@ -288,23 +285,17 @@ impl RecvWorker {
     fn run(mut self) {
         debug!("RecvWorker: started recv worker");
         while let Ok(rx_msg) = self.rx.recv() {
-            debug!(
-                "RecvWorker: received RecvWr for QP {} from {}",
-                rx_msg.qpn,
-                self.rx.addr.unwrap()
-            );
-            let recv_wr = rx_msg.wr;
-            let dqpn = rx_msg.qpn;
-            let addr = self.rx.addr.unwrap();
+            let addr = self.rx.addr.expect("RecvWorker: rx.addr must be set");  
+            debug!(  
+                "RecvWorker: received RecvWr for QP {} from {}",  
+                rx_msg.qpn,  
+                addr  
+            );  
+            let recv_wr = rx_msg.wr;  
+            let dqpn = rx_msg.qpn;  
             let qp_attr = self
                 .qp_attr_table
-                .query(|current| {
-                    if dqpn == current.dqpn && addr.to_bits() == current.dqp_ip {
-                        true
-                    } else {
-                        false
-                    }
-                });
+                .query(|current| dqpn == current.dqpn && addr.to_bits() == current.dqp_ip);
 
             let qpn = match qp_attr {
                 Some(attr) => attr.qpn,
@@ -318,24 +309,26 @@ impl RecvWorker {
             };
             self.recv_wr_queue_table
                 .clone_recv_wr_queue(qpn)
-                .ok_or(RdmaError::NotFound(format!(
-                        "Receive WR queue for QP {qpn} not found",
-                    ))).unwrap()
+                .unwrap_or_else( || {
+                    panic!("RecvWorker: Receive WR queue for QP {} not found", qpn);
+                })
                 .lock()
                 .push_back(recv_wr);
 
             try_match_pendings(
                 qpn,
-                &self.pending_send_queue_table.clone_queue(qpn).ok_or_else(|| {
-                    RdmaError::NotFound(format!("Pending send queue for QP {} not found", qpn))
-                }).unwrap(),
+                &self.pending_send_queue_table.clone_queue(qpn).unwrap_or_else( || {
+                        panic!("RecvWorker: Pending send queue for QP {} not found", qpn);
+                    }),
                 &self.recv_wr_queue_table
                     .clone_recv_wr_queue(qpn)
-                    .ok_or_else(|| {
-                        RdmaError::NotFound(format!("Receive WR queue for QP {} not found", qpn))
-                    }).unwrap(),
+                    .unwrap_or_else( || {
+                        panic!("RecvWorker: Receive WR queue for QP {} not found", qpn);
+                    }),
                 &self.rdma_write_tx,
-            ).unwrap();
+            ).unwrap_or_else(|e| {
+                panic!("RecvWorker: failed to match pending send WRs for QP {}: {}", qpn, e);
+            });
         }
     }
 }
@@ -381,12 +374,14 @@ impl RecvWorkers {
             self.local_addr,
             self.port
         );
-        let listener = TcpListener::bind((self.local_addr, self.port)).unwrap();
+        let listener = TcpListener::bind((self.local_addr, self.port)).unwrap_or_else(|e| {
+            panic!("Error binding listener: {}, port is {}", e, self.port);
+        });
 
         loop {
             match listener.accept() {
                 Ok((stream, addr)) => {
-                    log::info!("RecvWorkers: accepted connection from {}", stream.peer_addr().unwrap());
+                    log::info!("RecvWorkers: accepted connection from {}", addr);
                     let addr = match addr {
                         SocketAddr::V4(addr_v4) => addr_v4.ip().to_owned(),
                         SocketAddr::V6(_) => unreachable!(),
@@ -400,7 +395,7 @@ impl RecvWorkers {
                     )
                     .spawn();
                 }
-                Err(e) => println!("连接失败: {}", e),
+                Err(e) => println!("Connection failed: {}", e),
             }
         }
     }

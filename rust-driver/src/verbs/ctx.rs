@@ -200,9 +200,9 @@ where
         #[allow(clippy::mem_forget)]
         std::mem::forget(simple_nic_rx); // prevent libc::munmap being called
 
-        let recv_wr_queue_table =  RecvWrQueueTable::new();
-        let pending_post_recv_queue =  RecvWrQueueTable::new();
-        let pending_send_queue_table =  PendingSendQueueTable::new();
+        let recv_wr_queue_table = RecvWrQueueTable::new();
+        let pending_post_recv_queue = RecvWrQueueTable::new();
+        let pending_send_queue_table = PendingSendQueueTable::new();
 
         RecvWorkers::new(
             net_config.ip.ip(),
@@ -213,7 +213,6 @@ where
             rdma_write_tx.clone(),
         ).spawn();
         
-
         Ok(Self {
             net_config,
             device,
@@ -226,9 +225,9 @@ where
             mtt: Mtt::new(),
             ip_tx_table: IpTxTable::new(),
             post_recv_tx_table: PostRecvTxTable::new(),
-            recv_wr_queue_table: recv_wr_queue_table,
-            pending_post_recv_queue: pending_post_recv_queue,
-            pending_send_queue_table: pending_send_queue_table,
+            recv_wr_queue_table,
+            pending_post_recv_queue,
+            pending_send_queue_table,
             rdma_write_tx,
             completion_tx,
             config,
@@ -525,12 +524,10 @@ where
                 let current_ip = (current.dqp_ip != 0).then_some(current.dqp_ip);
                 let attr_ip = attr.dest_qp_ip().map(Ipv4Addr::to_bits);
                 let ip_addr = attr_ip.or(current_ip).unwrap_or_else(|| {
-                    if attr.qp_state() == Some(ibverbs_sys::ibv_qp_state::IBV_QPS_RTS) {
-                        let ip: Ipv4Addr = self.net_config.ip.ip();
-                        log::warn!("update qpn {} to RTS with default ip {}", qpn, ip);
-                        ip.to_bits()
-                    } else {
+                    if attr.qp_state() == Some(ibverbs_sys::ibv_qp_state::IBV_QPS_INIT) {
                         0
+                    } else {
+                        panic!("QP {qpn} dest_qp_ip must be set in state {:?}", attr.qp_state());
                     }
                 });
                 let entry = UpdateQp {
@@ -582,7 +579,7 @@ where
                     // 获取 tx 发送所有 pending 的 RecvWr
                     if let Some(tx) = self.post_recv_tx_table.get_qp_mut(qpn) {
                         while let Some(wr) = queue.pop_front() {
-                            if let Err(e) = tx.borrow_mut().send(RecvWrQpn {wr, qpn}) {
+                            if let Err(e) = tx.lock().send(RecvWrQpn {wr, qpn}) {
                                 error!("Failed to send pending RecvWr for QP {qpn}: {e}");
                             }
                         }
@@ -705,7 +702,7 @@ where
             // RTR/RTS 状态：直接发送
             debug!("Sending RecvWr for QP {qpn} in RTR/RTS state");
 
-            let result = tx.borrow_mut().send(RecvWrQpn {wr, qpn});
+            let result = tx.lock().send(RecvWrQpn {wr, qpn});
             debug!("result is {:?}", result);
             result?;
         } else {

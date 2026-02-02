@@ -1,3 +1,5 @@
+#[cfg(feature = "hw")]
+use core::panic;
 use std::{
     fs::File,
     io::{self, Read},
@@ -5,6 +7,8 @@ use std::{
     path::PathBuf,
 };
 
+#[cfg(feature = "mock")]
+use default_net::Interface;
 use ipnetwork::Ipv4Network;
 
 use crate::{
@@ -12,20 +16,25 @@ use crate::{
     net::config::NetworkConfig,
 };
 
-#[cfg(feature = "hw")]
-use crate::constants::BLUE_RDMA_NETDEV_INTERFACE_NAME;
-
 use super::config::MacAddress;
 
 pub(crate) struct NetConfigReader;
 
 impl NetConfigReader {
     pub(crate) fn read(sysfs_name: String) -> NetworkConfig {
+        // TODO: need to test
         #[cfg(feature = "hw")]
-        let interface = default_net::get_interfaces()
-            .into_iter()
-            .find(|x| x.name == BLUE_RDMA_NETDEV_INTERFACE_NAME)
-            .expect("blue-rdma netdev not present");
+        let interface = {
+            let interface_name = match sysfs_name.as_str() {
+                "uverbs0" => "blue0",
+                "uverbs1" => "blue1",
+                _ => panic!("unknown sysfs_name for sim: {}", sysfs_name),
+            };
+            default_net::get_interfaces()
+                .into_iter()
+                .find(|x| x.name == interface_name)
+                .expect("blue-rdma netdev not present")
+        };
 
         #[cfg(feature = "sim")]
         let interface = {
@@ -39,6 +48,10 @@ impl NetConfigReader {
                 .find(|x| x.name == interface_name)
                 .expect("blue-rdma netdev not present")
         };
+
+        #[cfg(feature = "mock")]
+        // to pass the compiler
+        let interface = Interface::default().unwrap();
 
         let ip = interface
             .ipv4
