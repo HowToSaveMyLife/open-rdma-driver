@@ -6,7 +6,7 @@ pub(crate) mod page;
 
 pub(crate) mod dmabuf;
 
-pub(crate) mod u_dma_buf;
+pub(crate) mod umem;
 
 mod utils;
 
@@ -20,16 +20,9 @@ pub(crate) use utils::*;
 use std::{
     io,
     ops::{Deref, DerefMut},
-    sync::Arc,
 };
 
-use crate::{
-    mem::{
-        pa_va_map::PaVaMap,
-        virt_to_phy::{AddressResolver, PhysAddrResolverLinuxX86},
-    },
-    types::{PageAlignedPhysAddr, PageAlignedVirtAddr, PhysAddr, VirtAddr},
-};
+use crate::{mem::virt_to_phy::AddressResolver, types::{PhysAddr, VirtAddr}};
 use page::MmapMut;
 
 /// Number of bits for a 4KB page size
@@ -138,124 +131,5 @@ pub(crate) trait MemoryPinner {
 
 pub(crate) trait UmemHandler: AddressResolver + MemoryPinner {}
 
-pub(crate) struct HostUmemHandler {
-    resolver: PhysAddrResolverLinuxX86,
-}
-
-impl HostUmemHandler {
-    pub(crate) fn new() -> Self {
-        Self {
-            resolver: PhysAddrResolverLinuxX86,
-        }
-    }
-}
-
-// TODO cuda Unified Memory 和 Pin memory 这两套系统可能会冲突，需要再次确认，同时传进来的时候可能就已经pin住了
-impl MemoryPinner for HostUmemHandler {
-    fn pin_pages(&self, addr: VirtAddr, length: usize) -> io::Result<()> {
-        let result = unsafe { libc::mlock(addr.as_ptr::<std::ffi::c_void>(), length) };
-        if result != 0 {
-            return Err(io::Error::new(io::ErrorKind::Other, "failed to lock pages"));
-        }
-        Ok(())
-    }
-
-    fn unpin_pages(&self, addr: VirtAddr, length: usize) -> io::Result<()> {
-        let result = unsafe { libc::munlock(addr.as_ptr::<std::ffi::c_void>(), length) };
-        if result != 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "failed to unlock pages",
-            ));
-        }
-        Ok(())
-    }
-}
-
-impl AddressResolver for HostUmemHandler {
-    fn virt_to_phys(&self, virt_addr: VirtAddr) -> io::Result<Option<PhysAddr>> {
-        self.resolver.virt_to_phys(virt_addr)
-    }
-
-    fn virt_to_phys_range(
-        &self,
-        start_addr: PageAlignedVirtAddr,
-        num_pages: usize,
-    ) -> io::Result<Vec<Option<PageAlignedPhysAddr>>> {
-        self.resolver.virt_to_phys_range(start_addr, num_pages)
-    }
-}
-
-impl UmemHandler for HostUmemHandler {}
-
-// 需要真正地pin住内存，来模仿实际的情况
-pub(crate) struct EmulatedUmemHandler {
-    resolver: PhysAddrResolverLinuxX86,
-    pa_va_map: Arc<parking_lot::RwLock<PaVaMap>>,
-}
-
-impl EmulatedUmemHandler {
-    pub(crate) fn new(pa_va_map: Arc<parking_lot::RwLock<PaVaMap>>) -> Self {
-        Self {
-            resolver: PhysAddrResolverLinuxX86,
-            pa_va_map,
-        }
-    }
-}
-
-impl MemoryPinner for EmulatedUmemHandler {
-    fn pin_pages(&self, addr: VirtAddr, length: usize) -> io::Result<()> {
-        let result = unsafe { libc::mlock(addr.as_ptr::<std::ffi::c_void>(), length) };
-        if result != 0 {
-            return Err(io::Error::new(io::ErrorKind::Other, "failed to lock pages"));
-        }
-
-        let num_pages = get_num_page(addr.as_u64(), length);
-        // Align down to page boundary for virt_to_phys_range
-        let aligned_addr = PageAlignedVirtAddr::align_down(addr);
-        let pas = self.resolver.virt_to_phys_range(aligned_addr, num_pages)?;
-        for (i, pa) in pas.iter().enumerate() {
-            // TODO 增加错误处理，不够严谨
-            let pa = pa.unwrap();
-            let va = addr
-                .offset(i as u64 * PAGE_SIZE as u64)
-                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "address overflow"))?;
-            let mut pa_va_map = self.pa_va_map.write();
-            // Convert aligned phys addr to regular PhysAddr for pa_va_map
-            pa_va_map.insert(pa.into_inner(), va, PAGE_SIZE);
-        }
-        Ok(())
-    }
-
-    fn unpin_pages(&self, addr: VirtAddr, length: usize) -> io::Result<()> {
-        let result = unsafe { libc::munlock(addr.as_ptr::<std::ffi::c_void>(), length) };
-        if result != 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "failed to unlock pages",
-            ));
-        }
-
-        let num_pages = get_num_page(addr.as_u64(), length);
-        // Align down to page boundary for virt_to_phys_range
-        let aligned_addr = PageAlignedVirtAddr::align_down(addr);
-        let pas = self.resolver.virt_to_phys_range(aligned_addr, num_pages)?;
-        for (i, pa) in pas.iter().enumerate() {
-            // TODO 增加错误处理，不够严谨
-            let pa = pa.unwrap();
-
-            let mut pa_va_map = self.pa_va_map.write();
-            // Convert aligned phys addr to regular PhysAddr for pa_va_map
-            pa_va_map.remove(pa.into_inner());
-        }
-        Ok(())
-    }
-}
-
-impl AddressResolver for EmulatedUmemHandler {
-    fn virt_to_phys(&self, virt_addr: VirtAddr) -> io::Result<Option<PhysAddr>> {
-        Ok(self.pa_va_map.read().lookup_by_va(virt_addr))
-    }
-}
-
-impl UmemHandler for EmulatedUmemHandler {}
+// Re-export UmemHandler implementations from umem submodule
+pub(crate) use umem::{EmulatedUmemHandler, HostUmemHandler};

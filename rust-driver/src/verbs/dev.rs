@@ -13,7 +13,7 @@ use crate::{
     constants::{DEVICE_ID, PCI_SYSFS_BUS_PATH, VENDER_ID},
     error::Result,
     mem::{
-        page::EmulatedPageAllocator, u_dma_buf::UDmaBufAllocator, EmulatedUmemHandler,
+        page::host::UDmaBufAllocator, page::EmulatedPageAllocator, EmulatedUmemHandler,
         HostUmemHandler,
     },
     ring::csr::{emulated::EmulatedDevice, hardware::SysfsPciCsrAdaptor},

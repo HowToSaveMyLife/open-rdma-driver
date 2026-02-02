@@ -1,8 +1,9 @@
-/// Host physical page allocator
-mod host;
+// TODO: old code to delete, Host physical page allocator
+// mod host_old;
 
 /// Emulated page allocator
 mod emulated;
+pub(crate) mod host;
 
 pub(crate) use emulated::EmulatedPageAllocator;
 
