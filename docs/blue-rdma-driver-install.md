@@ -191,6 +191,85 @@ export LD_LIBRARY_PATH=$PWD/dtld-ibverbs/target/debug:$PWD/dtld-ibverbs/rdma-cor
 
 ### 10. 验证安装
 
+#### 方法一：使用自动化测试框架（推荐用于 Sim 模式）
+
+Open RDMA Driver 提供了自动化测试框架，可以自动启动 RTL 仿真器、编译驱动和测试程序、运行测试并收集日志。测试框架位于 `tests/base_test/` 目录。
+
+**环境准备**：
+
+测试框架需要访问 RTL 仿真器代码（`open-rdma-rtl` 仓库）。有两种方式配置 RTL 路径：
+
+**方式 1：使用默认路径（推荐）**
+
+将 `open-rdma-rtl` 仓库克隆到与 `open-rdma-driver` 同级目录：
+
+**在父目录下运行**（如果已在 `open-rdma-driver` 目录，先 `cd ..`）：
+```bash
+git clone https://github.com/open-rdma/open-rdma-rtl.git
+```
+
+目录结构应该是：
+```
+parent-directory/
+├── open-rdma-driver/
+└── open-rdma-rtl/
+```
+
+**方式 2：自定义 RTL 路径**
+
+如果 RTL 仓库在其他位置，可以设置 `RTL_DIR` 环境变量：
+
+**在运行测试前设置**：
+```bash
+export RTL_DIR="/path/to/your/open-rdma-rtl"
+```
+
+或在每次运行测试时指定：
+```bash
+RTL_DIR="/path/to/your/open-rdma-rtl" ./scripts/test_loopback_sim.sh
+```
+
+**运行测试**：
+
+**在 open-rdma-driver/tests/base_test 目录下运行**：
+
+```bash
+# 进入测试目录
+cd tests/base_test
+
+# 运行单个测试
+./scripts/test_loopback_sim.sh 4096              # Loopback 测试
+./scripts/test_send_recv_sim.sh 4096             # Send/Recv 测试
+./scripts/test_rdma_write_sim.sh 4096 5          # RDMA Write 测试（5 轮）
+./scripts/test_write_imm_sim.sh 4096             # Write with Immediate 测试
+
+# 运行所有测试
+./scripts/run_all_tests.sh
+```
+
+测试日志会自动保存在 `tests/base_test/log/sim/` 目录下，可以查看详细的测试输出和 RTL 仿真器日志。
+
+**查看测试日志**：
+```bash
+# 查看 loopback 测试日志
+cat log/sim/rtl-loopback.log
+
+# 查看 send_recv 测试的 server 日志
+cat log/sim/send_recv/server.log
+
+# 查看 send_recv 测试的 client 日志
+cat log/sim/send_recv/client.log
+```
+
+**注意**：自动化测试框架会：
+- 自动编译 Rust 驱动（sim 模式）
+- 自动启动和停止 RTL 仿真器
+- 自动编译测试程序
+- 自动运行 server 和 client
+- 收集所有日志到指定目录
+
+#### 方法二：手动运行示例程序
+
 **在 open-rdma-driver 项目根目录下运行，编译示例程序**：
 ```bash
 cd examples
@@ -201,7 +280,7 @@ make
 
 根据编译时选择的模式运行：
 
-#### Mock 模式
+##### Mock 模式
 
 **单端回环测试（loopback）**：
 
@@ -224,7 +303,7 @@ make
 ./send_recv 8192 127.0.0.1
 ```
 
-#### Sim 模式
+##### Sim 模式
 
 **单端回环测试（loopback）**：
 ```bash
@@ -248,7 +327,7 @@ make
 ./send_recv 8192 127.0.0.1
 ```
 
-#### 调试选项
+##### 调试选项
 
 **如需查看详细日志，可添加环境变量**：
 ```bash
@@ -310,6 +389,9 @@ source ~/.bashrc
 
 # 9. 运行示例 - 在 open-rdma-driver 项目根目录下运行
 cd examples && make && ./loopback 8192
+
+# 10. (可选) 克隆 RTL 仓库用于自动化测试
+cd .. && git clone https://github.com/open-rdma/open-rdma-rtl.git
 ```
 
 ## 常见问题
@@ -341,10 +423,23 @@ cd examples && make && ./loopback 8192
 **硬件模式**：仅在有真实硬件设备时使用，⚠️ 目前尚未完全测试
 
 ### Q7: Sim 模式下示例程序无法运行
-**原因**：未启动 RTL 仿真器（achronix-400g 项目）
+**原因**：未启动 RTL 仿真器
 **解决**：
-1. 在单独的终端启动仿真器（参见 achronix-400g 项目的安装文档）
-2. 确保仿真器正常运行后再执行测试程序
+1. **推荐方式**：使用自动化测试框架（参见步骤 10 方法一），它会自动启动和管理 RTL 仿真器
+2. **手动方式**：在单独的终端启动仿真器（参见 open-rdma-driver 项目的安装文档）后再执行测试程序
+
+### Q8: 自动化测试提示 "RTL directory not found"
+**原因**：未正确配置 RTL 仓库路径
+**解决**：
+1. **方式一**：将 `open-rdma-rtl` 仓库克隆到 `open-rdma-driver` 的同级目录：
+   ```bash
+   cd /path/to/parent-directory
+   git clone https://github.com/open-rdma/open-rdma-rtl.git
+   ```
+2. **方式二**：设置环境变量 `RTL_DIR` 指向你的 RTL 仓库路径：
+   ```bash
+   export "RTL_DIR=/path/to/your/open-rdma-rtl"
+   ```
 
 ## 相关文档
 
@@ -353,5 +448,7 @@ cd examples && make && ./loopback 8192
 - [OFED 符号版本修复](./detail/ofed-symbol-version-fix.md)
 - [OFED RoCE 注册问题](./detail/ofed-roce-registration-issue.md)
 - [切换到 vanilla RDMA](./detail/switch-to-vanilla-rdma.md)
+- [自动化测试框架说明](../tests/base_test/README.md)
+- [测试脚本使用指南](../tests/base_test/scripts/README.md)
 
 

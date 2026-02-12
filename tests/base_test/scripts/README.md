@@ -1,335 +1,197 @@
 # Base Test Scripts
 
-这个目录包含用于运行 RDMA 基础测试的脚本，主要用于 RTL 模拟器环境。
+用于运行 RDMA 基础测试的自动化脚本，主要用于 RTL 模拟器环境（Sim 模式）。
 
-## 脚本清单
+## 环境准备
 
-### 核心脚本
+### RTL 仿真器路径配置
 
-#### `run_dual_sim_test.sh`
-通用的双端 RTL 模拟器测试框架，用于运行需要 server/client 模式的测试程序。
+测试脚本需要访问 RTL 仿真器代码（`open-rdma-rtl` 仓库）。
 
-**用法**:
+**配置方式 1：默认路径（推荐）**
+
+将 `open-rdma-rtl` 克隆到与 `open-rdma-driver` 同级目录：
+
 ```bash
-./run_dual_sim_test.sh <test_program> [args...]
+cd /path/to/parent-directory
+git clone https://github.com/open-rdma/open-rdma-rtl.git
 ```
 
-**示例**:
-```bash
-./run_dual_sim_test.sh send_recv 4096
-./run_dual_sim_test.sh rdma_write 8192 10
+目录结构：
+```
+parent-directory/
+├── open-rdma-driver/
+└── open-rdma-rtl/
 ```
 
-**功能**:
-- 自动启动 RTL 模拟器
-- 编译 Rust 驱动和测试程序
-- 启动 server 进程（使用传入的参数）
-- 启动 client 进程（自动添加 `127.0.0.1` 作为服务器地址）
-- 收集日志到 `../log/sim/<test_program>/` 目录
+**配置方式 2：自定义路径**
 
----
+设置 `RTL_DIR` 环境变量：
 
-### 单测试脚本
+```bash
+export RTL_DIR=/path/to/your/open-rdma-rtl
+# 或在运行时指定
+RTL_DIR=/custom/path ./test_loopback_sim.sh
+```
 
-#### `test_loopback_sim.sh`
-运行 loopback 测试（单端测试，无需 server/client）。
+## 快速使用
 
-**用法**:
+### 运行单个测试
+
 ```bash
 ./test_loopback_sim.sh [msg_len]
-```
-
-**参数**:
-- `msg_len`: 消息长度（字节），默认 4096
-
-**示例**:
-```bash
-./test_loopback_sim.sh          # 使用默认 4096 字节
-./test_loopback_sim.sh 8192     # 测试 8KB 消息
-```
-
----
-
-#### `test_send_recv_sim.sh`
-运行 Send/Recv 测试。
-
-**用法**:
-```bash
 ./test_send_recv_sim.sh [msg_len]
-```
-
-**参数**:
-- `msg_len`: 消息长度（字节），默认 4096
-
-**示例**:
-```bash
-./test_send_recv_sim.sh          # 使用默认 4096 字节
-./test_send_recv_sim.sh 16384    # 测试 16KB 消息
-```
-
----
-
-#### `test_rdma_write_sim.sh`
-运行 RDMA WRITE 测试，支持多轮重复测试。
-
-**用法**:
-```bash
-./test_rdma_write_sim.sh [msg_len] [num_rounds]
-```
-
-**参数**:
-- `msg_len`: 消息长度（字节），默认 4096
-- `num_rounds`: 测试轮数，默认 5
-
-**示例**:
-```bash
-./test_rdma_write_sim.sh                # 4096 字节，5 轮
-./test_rdma_write_sim.sh 8192 10        # 8192 字节，10 轮
-```
-
-**数据验证**: 使用顺序字节模式 `(i & 0xFF)`
-
----
-
-#### `test_write_imm_sim.sh`
-运行 RDMA WRITE with Immediate 测试（单次操作）。
-
-**用法**:
-```bash
+./test_rdma_write_sim.sh [msg_len] [rounds]
 ./test_write_imm_sim.sh [msg_len]
 ```
 
-**参数**:
-- `msg_len`: 消息长度（字节），默认 4096
-
-**示例**:
+**示例**：
 ```bash
-./test_write_imm_sim.sh              # 4096 字节
-./test_write_imm_sim.sh 2048         # 2048 字节
+./test_loopback_sim.sh 4096              # Loopback，4KB 消息
+./test_send_recv_sim.sh 8192             # Send/Recv，8KB 消息
+./test_rdma_write_sim.sh 4096 10         # RDMA Write，4KB，10 轮
+./test_write_imm_sim.sh 0                # Write with Imm，零长度
 ```
 
-**数据验证**: 使用固定字符 `'W'` 填充
+### 运行所有测试
 
----
-
-#### `test_write_imm_single_sim.sh`
-运行单次 RDMA WRITE with Immediate 测试，支持零长度测试。
-
-**用法**:
-```bash
-./test_write_imm_single_sim.sh [msg_len]
-```
-
-**参数**:
-- `msg_len`: 消息长度（字节），默认 0（零长度测试）
-
-**示例**:
-```bash
-./test_write_imm_single_sim.sh       # 零长度测试（只传输 immediate 数据）
-./test_write_imm_single_sim.sh 4096  # 4KB 数据 + immediate
-```
-
-**用途**: 特别用于测试零长度 WRITE_WITH_IMM 操作（只传输 immediate 值，无数据负载）
-
----
-
-#### `run_all_tests.sh`
-运行所有测试的测试套件，自动执行所有测试并汇总结果。
-
-**用法**:
 ```bash
 ./run_all_tests.sh
 ```
 
-**测试内容**:
-1. Loopback (4KB)
-2. Send/Recv (4KB)
-3. RDMA WRITE (4KB, 5 轮)
-4. WRITE with IMM (4KB, 10 次操作)
-5. WRITE with IMM Single (零长度)
-6. WRITE with IMM Single (4KB)
-
-**输出示例**:
+输出示例：
 ```
 ==========================================
           Test Suite Summary
 ==========================================
-
 PASS: Loopback (4KB)
 PASS: Send/Recv (4KB)
 PASS: RDMA WRITE (4KB, 5 rounds)
-FAIL: WRITE with IMM (4KB, 10 ops)
-PASS: WRITE with IMM Single (zero-length)
-PASS: WRITE with IMM Single (4KB)
-
+PASS: WRITE with IMM (4KB)
 ==========================================
-Total:  6
-Passed: 5
-Failed: 1
+Total:  4
+Passed: 4
+Failed: 0
 ==========================================
 ```
 
----
+## 脚本详细说明
 
-## 测试程序参数格式
+### test_loopback_sim.sh
+单端回环测试，一个设备上两个 QP 互相通信。
 
-所有测试程序统一遵循以下参数格式：
+**参数**：
+- `msg_len`：消息长度（字节），默认 4096
 
-### Server 模式（无 IP 地址参数）
+### test_send_recv_sim.sh
+双端 Send/Recv 测试。
+
+**参数**：
+- `msg_len`：消息长度（字节），默认 4096
+
+### test_rdma_write_sim.sh
+双端 RDMA WRITE 多轮测试。
+
+**参数**：
+- `msg_len`：消息长度（字节），默认 4096
+- `rounds`：测试轮数，默认 5
+
+### test_write_imm_sim.sh
+双端 RDMA WRITE with Immediate 测试。
+
+**参数**：
+- `msg_len`：消息长度（字节），默认 4096
+  - 可以设置为 0 进行零长度测试（只传输 immediate 值）
+
+### run_dual_sim_test.sh
+通用的双端测试框架，其他脚本基于此实现。
+
+**用法**：
 ```bash
-<program> [msg_len] [other_args...]
+./run_dual_sim_test.sh <test_program> [args...]
 ```
 
-### Client 模式（包含 IP 地址参数）
-```bash
-<program> [msg_len] <server_ip> [other_args...]
-```
+## 测试日志
 
-**自动检测规则**: 如果第二个参数包含 `.` 或 `:` 字符，则判断为 client 模式。
-
-### 各程序参数详情
-
-| 程序 | Server 参数 | Client 参数 | 默认值 |
-|------|------------|------------|--------|
-| `loopback` | `[msg_len]` | N/A（单端测试） | msg_len=4096 |
-| `send_recv` | `[msg_len]` | `[msg_len] <server_ip>` | msg_len=4096 |
-| `rdma_write` | `[msg_len] [rounds]` | `[msg_len] [rounds] <server_ip>` | msg_len=4096, rounds=5, dev=1(server)/0(client) 固定 |
-| `write_with_imm` | `[msg_len]` | `[msg_len] <server_ip>` | msg_len=4096 |
-
----
-
-## 日志输出
-
-所有测试日志保存在 `../log/sim/<test_name>/` 目录下：
+日志保存在 `../log/sim/` 目录：
 
 ```
 log/sim/
+├── rtl-loopback.log           # Loopback RTL 日志
 ├── send_recv/
-│   ├── server.log
-│   └── client.log
-├── rdma_write/
-│   ├── server.log
-│   └── client.log
-└── write_with_imm/
-    ├── server.log
-    └── client.log
+│   ├── server.log             # Server 应用日志
+│   ├── client.log             # Client 应用日志
+│   ├── rtl-server.log         # Server RTL 日志
+│   └── rtl-client.log         # Client RTL 日志
+└── rdma_write/
+    └── ...
 ```
 
-**查看日志**:
+**查看日志**：
 ```bash
-# 实时查看 server 日志
-tail -f ../log/sim/rdma_write/server.log
-
-# 查看 client 日志
-cat ../log/sim/rdma_write/client.log
+cat ../log/sim/rtl-loopback.log               # 查看日志
+tail -f ../log/sim/send_recv/server.log       # 实时查看
 ```
 
----
+## 脚本功能
+
+所有测试脚本会自动执行以下操作：
+
+1. **初始化环境**：设置 DRIVER_DIR、RTL_DIR 路径
+2. **编译 Rust 驱动**：使用 sim 特性编译 dtld-ibverbs
+3. **启动 RTL 仿真器**：自动启动所需数量的 RTL 实例
+4. **编译测试程序**：编译 base_test 测试程序
+5. **运行测试**：启动 server/client 进程（双端测试）
+6. **收集日志**：所有输出保存到日志文件
+7. **清理资源**：测试结束后自动停止 RTL 仿真器
 
 ## 环境变量
 
-### `RUST_LOG`
-控制 Rust 驱动的日志级别。
+### RTL_DIR
+RTL 仓库路径（可选，默认为 `../../../open-rdma-rtl`）
 
-**默认值**: `info`
-
-**可选值**: `trace`, `debug`, `info`, `warn`, `error`
-
-**示例**:
 ```bash
-RUST_LOG=debug ./test_send_recv_sim.sh 4096
+export RTL_DIR=/path/to/open-rdma-rtl
 ```
 
-### `RDMA_BUFFER_SIZE`
-设置 RDMA 缓冲区大小（可选）。
+### RUST_LOG
+Rust 驱动日志级别（默认 `info`）
 
-**示例**:
 ```bash
-RDMA_BUFFER_SIZE=524288 ./test_rdma_write_sim.sh 8192
+RUST_LOG=debug ./test_loopback_sim.sh
 ```
 
----
-
-## 数据验证
-
-所有测试都使用统一的数据验证框架（位于 `lib/rdma_debug.h`）：
-
-### 验证函数
-- `rdma_verify_data()`: 统一数据验证接口
-- `rdma_generate_pattern()`: 自动生成期望数据模式
-
-### 数据模式
-
-| 测试 | 数据模式 | 说明 |
-|------|---------|------|
-| `loopback` | 顺序字节 `(i & 0xFF)` | 0x00, 0x01, ..., 0xFF, 0x00, ... |
-| `send_recv` | 固定字符 `'c'` (0x63) | 全部填充字符 'c' |
-| `rdma_write` | 顺序字节 `(i & 0xFF)` | 0x00, 0x01, ..., 0xFF, 0x00, ... |
-| `write_with_imm` | 固定字符 `'W'` (0x57) | 全部填充字符 'W' |
-
-### 验证失败输出
-
-当数据不匹配时，验证函数会自动打印彩色差异：
-- **红色**: 期望值
-- **绿色**: 实际值
-- 显示差异字节的前后文（每行 16 字节）
-
-**示例输出**:
-```
-0x00000100: 00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f     ................
-0x00000110: 10 11 12 ff 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f     ................  (期望)
-0x00000110: 10 11 12 aa 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f     ................  (实际)
-              ^^        ^^
-0x00000120: 20 21 22 23 24 25 26 27 28 29 2a 2b 2c 2d 2e 2f     !"#$%&'()*+,-./
-```
-
----
+可选值：`trace`, `debug`, `info`, `warn`, `error`
 
 ## 故障排查
 
-### 编译失败
-```bash
-# 清理并重新编译
-cd ..
-make clean
-make
+### RTL 目录未找到
 ```
-
-### RTL 模拟器启动失败
-检查 `test_common.sh` 中的 RTL 路径配置：
-```bash
-# 查看共同函数库
-cat ../../common/test_common.sh
+Error: RTL directory not found: /path/to/open-rdma-rtl
 ```
+**解决**：
+- 确认 RTL 仓库已克隆
+- 检查目录结构或设置 `RTL_DIR` 环境变量
 
-### 测试卡住/超时
-检查日志文件：
-```bash
-# 查看 server 日志
-tail -20 ../log/sim/<test_name>/server.log
-
-# 查看 client 日志
-tail -20 ../log/sim/<test_name>/client.log
+### RTL 启动失败
 ```
+Error: RTL process failed to start or died
+```
+**解决**：
+- 查看 RTL 日志：`cat ../log/sim/rtl-*.log`
+- 确保 RTL 仓库完整（包含子模块）
+
+### 测试超时
+**解决**：
+- 检查应用日志：`tail ../log/sim/<test>/server.log`
+- 检查 RTL 日志是否有错误
 
 ### 数据验证失败
-- 日志会自动显示详细的字节差异
-- 检查测试程序的数据模式是否正确
-- 确认 RTL 模拟器正常工作
+测试会自动显示字节级差异，检查：
+- 日志中的详细差异信息
+- RTL 仿真器是否正常工作
 
----
+## 参考
 
-## 贡献
-
-添加新测试时，请遵循以下规范：
-
-1. **统一参数格式**: Server 不带 IP，Client 带 IP
-2. **使用统一验证**: 调用 `rdma_verify_data()` 函数
-3. **创建包装脚本**: 参考 `test_*_sim.sh` 格式
-4. **更新文档**: 在本 README 中添加说明
-
----
-
-## 许可证
-
-与主项目相同的许可证。
+- [../README.md](../README.md) - 测试框架总览
+- [../../common/test_common.sh](../../common/test_common.sh) - 公共测试函数库
