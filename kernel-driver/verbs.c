@@ -100,7 +100,7 @@ int bluerdma_post_recv(struct ib_qp *ibqp, const struct ib_recv_wr *wr,
 	return 0;
 }
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6,11,0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0)
 int bluerdma_create_cq(struct ib_cq *ibcq, const struct ib_cq_init_attr *attr,
 		       struct ib_udata *udata)
 {
@@ -142,9 +142,15 @@ struct ib_mr *bluerdma_get_dma_mr(struct ib_pd *ibpd, int access)
 
 	return mr;
 }
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 11, 0)
+struct ib_mr *bluerdma_reg_user_mr(struct ib_pd *pd, u64 start, u64 length,
+				   u64 virt_addr, int access_flags, struct ib_dmah *dmah,
+				   struct ib_udata *udata)
+#else
 struct ib_mr *bluerdma_reg_user_mr(struct ib_pd *pd, u64 start, u64 length,
 				   u64 virt_addr, int access_flags,
 				   struct ib_udata *udata)
+#endif
 {
 	struct ib_mr *mr;
 	pr_info("bluerdma_reg_user_mr\n");

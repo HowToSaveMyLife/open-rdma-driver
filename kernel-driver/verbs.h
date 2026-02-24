@@ -43,9 +43,15 @@ int bluerdma_poll_cq(struct ib_cq *ibcq, int num_entries, struct ib_wc *wc);
 int bluerdma_req_notify_cq(struct ib_cq *ibcq, enum ib_cq_notify_flags flags);
 
 struct ib_mr *bluerdma_get_dma_mr(struct ib_pd *ibpd, int access);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 11, 0)
+struct ib_mr *bluerdma_reg_user_mr(struct ib_pd *pd, u64 start, u64 length,
+				   u64 virt_addr, int access_flags, struct ib_dmah *dmah,
+				   struct ib_udata *udata);
+#else
 struct ib_mr *bluerdma_reg_user_mr(struct ib_pd *pd, u64 start, u64 length,
 				   u64 virt_addr, int access_flags,
 				   struct ib_udata *udata);
+#endif
 int bluerdma_dereg_mr(struct ib_mr *mr, struct ib_udata *udata);
 
 int bluerdma_get_port_immutable(struct ib_device *ibdev, u32 port_num,
