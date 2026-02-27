@@ -77,7 +77,7 @@ sudo ip addr add 17.34.51.11/24 dev blue1
 ip addr show blue0
 ip addr show blue1
 
-# 仿真模式下可能需要关闭网卡来防止配置被清空，母亲啊不清除原理
+# 仿真模式下可能需要关闭网卡来防止配置被清空，目前不清楚原理
 sudo ip link set dev blue0 down
 sudo ip link set dev blue1 down
 
