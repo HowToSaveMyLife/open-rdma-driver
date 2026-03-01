@@ -30,12 +30,12 @@ use crate::ring::csr::ring_csr::WriterOps;
 /// - **Memory ordering**: Release fence before updating CSR head
 ///
 /// # Empty vs Full Distinction
-/// This implementation uses monotonically increasing u32 head/tail pointers:
-/// - **Empty**: `head == tail` (used = 0)
-/// - **Full**: `head - tail == BUF_SIZE` (used = BUF_SIZE)
-/// - Pointers never wrap at BUF_SIZE; they use full u32 range
-/// - Buffer indexing: `index = (head as usize) & BUF_SIZE_MASK`
-/// - Requires hardware CSR registers to also use 32-bit monotonic counters
+/// The hardware tail CSR register is **modular** in `[0, BUF_SIZE)` and does NOT
+/// monotonically increase. An explicit `is_full` flag is used to distinguish:
+/// - **Empty**: `head_mod == hw_tail` AND `!is_full` (used = 0)
+/// - **Full**: `head_mod == hw_tail` AND `is_full` (used = BUF_SIZE)
+/// - Buffer indexing: `index = cached_head & BUF_SIZE_MASK`
+/// - `is_full` is set after a push fills the ring; cleared when `hw_tail` changes
 ///
 /// # Example
 /// ```rust,ignore
@@ -51,6 +51,7 @@ use crate::ring::csr::ring_csr::WriterOps;
 /// }
 /// slots.commit()?;  // Single CSR write for all 10 descriptors
 /// ```
+/// TODO need to change to lazy sync
 pub(crate) struct ProducerRing<Dev, Spec, const BUF_SIZE_EXP: u8>
 where
     Dev: DeviceAdaptor,
@@ -65,9 +66,17 @@ where
     /// Cached local head (software producer pointer)
     cached_head: u32,
 
-    /// Cached hardware tail (hardware consumer pointer)
-    /// Updated lazily on space checks
+    /// Cached hardware tail (hardware consumer pointer).
+    /// MODULAR value in [0, BUF_SIZE). NOT monotonically increasing.
+    /// Updated lazily on space checks.
     cached_hw_tail: u32,
+
+    /// True when the ring is known to be full.
+    ///
+    /// Required because modular `hw_tail` cannot distinguish "ring empty"
+    /// (head_mod == hw_tail, 0 used) from "ring full" (head_mod == hw_tail,
+    /// BUF_SIZE used) without external state.
+    is_full: bool,
 
     /// Phantom data to mark the logical element type
     _phantom: PhantomData<<Spec::Element as ToRingBytes>::Bytes>,
@@ -81,6 +90,8 @@ where
 {
     const BUF_SIZE: u32 = 1 << BUF_SIZE_EXP;
     const BUF_SIZE_MASK: u32 = Self::BUF_SIZE - 1;
+    /// 13-bit mask covering both guard bit and idx, matches hardware's pointer width.
+    const HW_PTR_MASK: u32 = Self::BUF_SIZE * 2 - 1;
 
     /// Create a new producer ring
     ///
@@ -116,6 +127,7 @@ where
             csr_ring,
             cached_head: 0,
             cached_hw_tail: 0,
+            is_full: false,
             _phantom: PhantomData,
         })
     }
@@ -125,13 +137,25 @@ where
     /// This operation reads the hardware tail pointer via CSR, which may
     /// have performance implications. Consider using batch operations.
     pub(crate) fn available(&mut self) -> io::Result<u32> {
-        // Read hardware tail pointer (expensive CSR operation)
+        // Read hardware tail pointer (modular, in [0, BUF_SIZE))
         let hw_tail = self.csr_ring.read_tail()?;
-        self.cached_hw_tail = hw_tail;
 
-        // Calculate free space
-        let used = self.cached_head.wrapping_sub(hw_tail);
-        Ok(Self::BUF_SIZE.saturating_sub(used))
+        // Tail advanced → hardware consumed at least one entry, ring is not full
+        if hw_tail != self.cached_hw_tail {
+            self.is_full = false;
+            self.cached_hw_tail = hw_tail;
+        }
+
+        if self.is_full {
+            return Ok(0);
+        }
+
+        // Modular distance: works correctly across wraparound of head_mod
+        let head_mod = self.cached_head & Self::BUF_SIZE_MASK;
+        let used =
+            head_mod.wrapping_sub(hw_tail).wrapping_add(Self::BUF_SIZE) & Self::BUF_SIZE_MASK;
+
+        Ok(Self::BUF_SIZE - used)
     }
 
     /// Batch write using a callback function
@@ -187,6 +211,10 @@ where
         let new_head = start_head.wrapping_add(count);
         self.csr_ring.write_head(new_head)?;
         self.cached_head = new_head;
+
+        if new_head & Self::HW_PTR_MASK == self.cached_hw_tail {
+            self.is_full = true;
+        }
 
         Ok(count)
     }
@@ -247,6 +275,10 @@ where
         self.csr_ring.write_head(new_head)?;
         self.cached_head = new_head;
 
+        if new_head & Self::HW_PTR_MASK == self.cached_hw_tail {
+            self.is_full = true;
+        }
+
         Ok(true)
     }
 
@@ -263,7 +295,10 @@ where
     /// Manually synchronize tail from hardware
     pub(crate) fn sync_tail(&mut self) -> io::Result<()> {
         let hw_tail = self.csr_ring.read_tail()?;
-        self.cached_hw_tail = hw_tail;
+        if hw_tail != self.cached_hw_tail {
+            self.is_full = false;
+            self.cached_hw_tail = hw_tail;
+        }
         Ok(())
     }
 
@@ -274,6 +309,7 @@ where
     pub(crate) fn force_set_head(&mut self, head: u32) -> io::Result<()> {
         self.csr_ring.write_head(head)?;
         self.cached_head = head;
+        self.is_full = false;
         Ok(())
     }
 }

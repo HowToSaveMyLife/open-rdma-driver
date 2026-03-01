@@ -78,7 +78,7 @@ impl TcpChannelRx {
         }
         let stream = self.stream.as_mut().unwrap_or_else(|| unreachable!());
         stream.read_exact(self.buf.as_mut())?;
-        Ok({ RecvWrQpn::from_bytes(&self.buf) })
+        Ok(RecvWrQpn::from_bytes(&self.buf))
     }
 }
 

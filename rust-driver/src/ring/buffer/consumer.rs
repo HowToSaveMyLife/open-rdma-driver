@@ -25,10 +25,11 @@ use super::desc_ring::DmaBuffer;
 /// - **Memory ordering**: Acquire fence after reading descriptors
 ///
 /// # Empty vs Full Distinction
-/// Uses same monotonic counter strategy as ProducerRing:
-/// - **Empty**: `hw_head == cached_tail` (available = 0)
-/// - **Full**: `hw_head - cached_tail == BUF_SIZE` (available = BUF_SIZE)
-/// - Available elements: `hw_head.wrapping_sub(cached_tail)`
+/// The hardware head CSR register is **modular** in `[0, BUF_SIZE)`.
+/// When `tail_mod == hw_head` the ring could be either empty (0 items) or
+/// full (BUF_SIZE items); this is inherently ambiguous. `available()` returns
+/// `None` in that case. Callers must use `try_pop()` (flag-bit based) for
+/// actual consumption without relying on `available()` for the boundary case.
 ///
 /// WARN: 读取的时候不会看 head ptr，而只是看 tail ptr 指向的 element 的标志位是否到达
 pub(crate) struct ConsumerRing<Dev, Spec, const BUF_SIZE_EXP: u8>
@@ -45,7 +46,8 @@ where
     /// Cached local tail (software consumer pointer)
     cached_tail: u32,
 
-    /// Cached hardware head (hardware producer pointer)
+    /// Cached hardware head (hardware producer pointer).
+    /// MODULAR value in [0, BUF_SIZE). NOT monotonically increasing.
     cached_hw_head: u32,
 }
 
@@ -57,6 +59,8 @@ where
 {
     const BUF_SIZE: u32 = 1 << BUF_SIZE_EXP;
     const BUF_SIZE_MASK: u32 = Self::BUF_SIZE - 1;
+    /// 13-bit mask covering both guard bit and idx, matches hardware's pointer width.
+    const HW_PTR_MASK: u32 = Self::BUF_SIZE * 2 - 1;
     /// Create a new consumer ring
     ///
     /// # Arguments
@@ -95,12 +99,27 @@ where
         })
     }
 
-    /// Get number of available elements to consume
-    pub(crate) fn available(&mut self) -> io::Result<usize> {
+    /// Get number of available elements to consume.
+    ///
+    /// Returns `None` when `hw_head == tail_mod`: the ring could be either
+    /// empty or full and the caller must not rely on this value.
+    pub(crate) fn available(&mut self) -> io::Result<Option<usize>> {
+        // Read hardware head pointer (modular, in [0, BUF_SIZE))
         let hw_head = self.csr_ring.read_head()?;
         self.cached_hw_head = hw_head;
 
-        Ok(hw_head.wrapping_sub(self.cached_tail) as usize)
+        let tail_mod = self.cached_tail & Self::BUF_SIZE_MASK;
+
+        if hw_head == tail_mod {
+            // Ambiguous: could be empty (0) or full (BUF_SIZE)
+            return Ok(None);
+        }
+
+        // Modular distance: works correctly across wraparound
+        let available =
+            hw_head.wrapping_sub(tail_mod).wrapping_add(Self::BUF_SIZE) & Self::BUF_SIZE_MASK;
+
+        Ok(Some(available as usize))
     }
 
     fn read_and_advance(&mut self) -> <Spec::Element as FromRingBytes>::Bytes {
@@ -112,7 +131,12 @@ where
     }
 
     fn write_tail_csr(&mut self) -> io::Result<()> {
-        self.csr_ring.write_tail(self.cached_tail)
+        // Write tail pointer to hardware including the guard bit.
+        // Hardware uses a {guard, idx} pointer of width BUF_SIZE_EXP+1 bits;
+        // stripping the guard bit (using BUF_SIZE_MASK) would send the wrong
+        // wrap generation and cause hardware to misdetect full/empty.
+        self.csr_ring
+            .write_tail(self.cached_tail & Self::HW_PTR_MASK)
     }
 
     fn read_head_csr(&mut self) -> io::Result<u32> {
