@@ -45,7 +45,7 @@ sudo setpci  -s 01:00.0 CAP_EXP+28.w=0x1000
 
 
 cd $SCRIPT_DIR/..
-sudo env RUST_BACKTRACE=full RUST_LOG=debug LD_LIBRARY_PATH="$LD_LIBRARY_PATH" ./build/bin/loopback $MSG_LEN 10000 > $LOG_DIR/loopback.log 2>&1 &
+sudo env RUST_BACKTRACE=debug RUST_LOG=info LD_LIBRARY_PATH="$LD_LIBRARY_PATH" ./build/bin/loopback $MSG_LEN 10 > $LOG_DIR/loopback.log 2>&1 &
 # sudo env RUST_BACKTRACE=full RUST_LOG=info LD_LIBRARY_PATH="$LD_LIBRARY_PATH" ./build/bin/loopback $MSG_LEN 100 &
 
 LOOPBACK_PID=$!

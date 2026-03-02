@@ -100,26 +100,29 @@ where
     }
 
     /// Get number of available elements to consume.
-    ///
-    /// Returns `None` when `hw_head == tail_mod`: the ring could be either
-    /// empty or full and the caller must not rely on this value.
-    pub(crate) fn available(&mut self) -> io::Result<Option<usize>> {
+    pub(crate) fn available(&mut self) -> io::Result<usize> {
         // Read hardware head pointer (modular, in [0, BUF_SIZE))
         let hw_head = self.csr_ring.read_head()?;
         self.cached_hw_head = hw_head;
 
-        let tail_mod = self.cached_tail & Self::BUF_SIZE_MASK;
+        let hw_head_mod = hw_head & Self::BUF_SIZE_MASK;
 
-        if hw_head == tail_mod {
-            // Ambiguous: could be empty (0) or full (BUF_SIZE)
-            return Ok(None);
+        let tail_mod = self.cached_tail & Self::BUF_SIZE_MASK;
+        let tail_with_guard = self.cached_tail & Self::HW_PTR_MASK;
+
+        if hw_head_mod == tail_mod {
+            if tail_with_guard == hw_head {
+                return Ok(0);
+            } else {
+                return Ok(Self::BUF_SIZE as usize);
+            }
         }
 
         // Modular distance: works correctly across wraparound
         let available =
             hw_head.wrapping_sub(tail_mod).wrapping_add(Self::BUF_SIZE) & Self::BUF_SIZE_MASK;
 
-        Ok(Some(available as usize))
+        Ok(available as usize)
     }
 
     fn read_and_advance(&mut self) -> <Spec::Element as FromRingBytes>::Bytes {

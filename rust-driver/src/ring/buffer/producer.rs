@@ -71,13 +71,6 @@ where
     /// Updated lazily on space checks.
     cached_hw_tail: u32,
 
-    /// True when the ring is known to be full.
-    ///
-    /// Required because modular `hw_tail` cannot distinguish "ring empty"
-    /// (head_mod == hw_tail, 0 used) from "ring full" (head_mod == hw_tail,
-    /// BUF_SIZE used) without external state.
-    is_full: bool,
-
     /// Phantom data to mark the logical element type
     _phantom: PhantomData<<Spec::Element as ToRingBytes>::Bytes>,
 }
@@ -127,7 +120,6 @@ where
             csr_ring,
             cached_head: 0,
             cached_hw_tail: 0,
-            is_full: false,
             _phantom: PhantomData,
         })
     }
@@ -140,18 +132,18 @@ where
         // Read hardware tail pointer (modular, in [0, BUF_SIZE))
         let hw_tail = self.csr_ring.read_tail()?;
 
-        // Tail advanced → hardware consumed at least one entry, ring is not full
-        if hw_tail != self.cached_hw_tail {
-            self.is_full = false;
-            self.cached_hw_tail = hw_tail;
-        }
+        let hw_tail_mod = hw_tail & Self::BUF_SIZE_MASK;
 
-        if self.is_full {
-            return Ok(0);
-        }
-
-        // Modular distance: works correctly across wraparound of head_mod
         let head_mod = self.cached_head & Self::BUF_SIZE_MASK;
+        let head_with_guard = self.cached_head & Self::HW_PTR_MASK;
+
+        if hw_tail_mod == head_mod {
+            if head_with_guard == hw_tail {
+                return Ok(Self::BUF_SIZE);
+            } else {
+                return Ok(0);
+            }
+        }
         let used =
             head_mod.wrapping_sub(hw_tail).wrapping_add(Self::BUF_SIZE) & Self::BUF_SIZE_MASK;
 
@@ -212,10 +204,6 @@ where
         self.csr_ring.write_head(new_head)?;
         self.cached_head = new_head;
 
-        if new_head & Self::HW_PTR_MASK == self.cached_hw_tail {
-            self.is_full = true;
-        }
-
         Ok(count)
     }
 
@@ -275,10 +263,6 @@ where
         self.csr_ring.write_head(new_head)?;
         self.cached_head = new_head;
 
-        if new_head & Self::HW_PTR_MASK == self.cached_hw_tail {
-            self.is_full = true;
-        }
-
         Ok(true)
     }
 
@@ -295,10 +279,7 @@ where
     /// Manually synchronize tail from hardware
     pub(crate) fn sync_tail(&mut self) -> io::Result<()> {
         let hw_tail = self.csr_ring.read_tail()?;
-        if hw_tail != self.cached_hw_tail {
-            self.is_full = false;
-            self.cached_hw_tail = hw_tail;
-        }
+        self.cached_hw_tail = hw_tail;
         Ok(())
     }
 
@@ -309,7 +290,7 @@ where
     pub(crate) fn force_set_head(&mut self, head: u32) -> io::Result<()> {
         self.csr_ring.write_head(head)?;
         self.cached_head = head;
-        self.is_full = false;
+
         Ok(())
     }
 }
