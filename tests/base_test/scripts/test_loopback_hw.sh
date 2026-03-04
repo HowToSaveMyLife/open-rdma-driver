@@ -31,6 +31,8 @@ setup_runtime_environment
 
 # 运行 loopback 测试，参数是消息长度
 MSG_LEN=${1:-209600}  # 默认 4096 字节
+ROUND=${2:-10}  # 默认 10 轮
+RUST_LOG=${RUST_LOG:-info}  # 默认 info 级别日志
 
 echo "Running loopback test with MSG_LEN=$MSG_LEN"
 
@@ -45,8 +47,8 @@ sudo setpci  -s 01:00.0 CAP_EXP+28.w=0x1000
 
 
 cd $SCRIPT_DIR/..
-sudo env RUST_BACKTRACE=debug RUST_LOG=info LD_LIBRARY_PATH="$LD_LIBRARY_PATH" ./build/bin/loopback $MSG_LEN 10 > $LOG_DIR/loopback.log 2>&1 &
-# sudo env RUST_BACKTRACE=full RUST_LOG=info LD_LIBRARY_PATH="$LD_LIBRARY_PATH" ./build/bin/loopback $MSG_LEN 100 &
+# sudo env RUST_BACKTRACE=debug RUST_LOG=$RUST_LOG LD_LIBRARY_PATH="$LD_LIBRARY_PATH" ./build/bin/loopback $MSG_LEN $ROUND > $LOG_DIR/loopback.log 2>&1 &
+sudo env RUST_BACKTRACE=debug RUST_LOG=$RUST_LOG LD_LIBRARY_PATH="$LD_LIBRARY_PATH" ./build/bin/small_pack_loopback $MSG_LEN $ROUND > $LOG_DIR/loopback.log 2>&1 &
 
 LOOPBACK_PID=$!
 
